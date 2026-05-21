@@ -71,7 +71,7 @@ export default function Hero() {
         {/* CTAs */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, flexWrap: 'wrap' }}>
           <a
-            href="#"
+            href="/signup"
             style={{
               fontFamily: 'var(--font)', fontSize: 15, fontWeight: 600,
               padding: '14px 28px', borderRadius: 9, textDecoration: 'none',

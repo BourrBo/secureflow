@@ -71,8 +71,8 @@ export default function Navbar() {
 
         {/* Right CTA */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <a
-            href="#"
+          <Link
+            href="/login"
             style={{
               fontFamily: 'var(--font)', fontSize: 13, fontWeight: 500,
               padding: '8px 16px', borderRadius: 7,
@@ -81,9 +81,9 @@ export default function Navbar() {
             }}
           >
             Sign in
-          </a>
-          <a
-            href="#"
+          </Link>
+          <Link
+            href="/signup"
             style={{
               fontFamily: 'var(--font)', fontSize: 13, fontWeight: 600,
               padding: '8px 18px', borderRadius: 7,
@@ -92,7 +92,7 @@ export default function Navbar() {
             }}
           >
             Start free →
-          </a>
+          </Link>
         </div>
       </div>
     </nav>

@@ -30,7 +30,7 @@ export default function CtaBand() {
         style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12 }}
       >
         <a
-          href="#"
+          href="/signup"
           style={{
             fontFamily: 'var(--font)', fontSize: 15, fontWeight: 600,
             padding: '14px 28px', borderRadius: 9, textDecoration: 'none',
@@ -41,7 +41,7 @@ export default function CtaBand() {
           Start scanning free →
         </a>
         <a
-          href="#"
+          href="/login"
           style={{
             fontFamily: 'var(--font)', fontSize: 15, fontWeight: 600,
             padding: '14px 28px', borderRadius: 9, textDecoration: 'none',
