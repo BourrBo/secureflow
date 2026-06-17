@@ -16,11 +16,6 @@ export const metadata: Metadata = {
     type: 'website',
     url: 'https://secureflow.io',
   },
-  twitter: {
-    card: 'summary_large_image',
-    title: 'SecureFlow — Enterprise AppSec Platform',
-    description: 'Unify SAST, SCA, Secrets, IaC & Container scanning.',
-  },
   robots: { index: true, follow: true },
 }
 
@@ -30,8 +25,8 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-  <html lang="en" suppressHydrationWarning>
-    <body suppressHydrationWarning>{children}</body>
-  </html>
+    <html lang="en" suppressHydrationWarning>
+      <body suppressHydrationWarning>{children}</body>
+    </html>
   )
 }

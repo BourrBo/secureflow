@@ -1,36 +1,83 @@
 @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&family=DM+Sans:ital,wght@0,300;0,400;0,500;1,300&display=swap');
 
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
-
-:root {
-  --bg: #03080F;
-  --bg2: #060D18;
-  --bg3: #0A1526;
-  --card: #0D1B2E;
-  --card2: #111F35;
-  --blue: #1B7FFF;
-  --blue-glow: rgba(27, 127, 255, 0.15);
-  --blue-lt: #4D9FFF;
-  --cyan: #00D4FF;
-  --green: #00E576;
-  --red: #FF3B5C;
-  --amber: #FFB020;
-  --border: rgba(255, 255, 255, 0.07);
-  --border2: rgba(27, 127, 255, 0.2);
-  --text: #F0F4FF;
-  --text2: #8A9BC0;
-  --text3: #3D5070;
-  --font: 'Syne', system-ui, sans-serif;
-  --body: 'DM Sans', system-ui, sans-serif;
-  --mono: 'JetBrains Mono', monospace;
-}
-
 * {
   box-sizing: border-box;
   margin: 0;
   padding: 0;
+}
+
+/* ══════════════════════════════════
+   DARK THEME (default)
+══════════════════════════════════ */
+:root,
+[data-theme='dark'] {
+  --bg:      #03080F;
+  --bg2:     #060D18;
+  --bg3:     #0A1526;
+  --card:    #0D1B2E;
+  --card2:   #111F35;
+  --navy:    #050E1F;
+
+  --blue:    #1B7FFF;
+  --blue-lt: #4D9FFF;
+  --cyan:    #00D4FF;
+  --green:   #00E576;
+  --red:     #FF3B5C;
+  --amber:   #FFB020;
+
+  --border:  rgba(255, 255, 255, 0.07);
+  --border2: rgba(27, 127, 255, 0.2);
+
+  --text:    #F0F4FF;
+  --text2:   #8A9BC0;
+  --text3:   #3D5070;
+
+  --sidebar-bg:   #050E1F;
+  --sidebar-text: rgba(255, 255, 255, 0.55);
+
+  --row-hover: rgba(255, 255, 255, 0.03);
+  --shadow:    0 1px 4px rgba(0, 0, 0, 0.3);
+}
+
+/* ══════════════════════════════════
+   LIGHT THEME
+══════════════════════════════════ */
+[data-theme='light'] {
+  --bg:      #F7F9FC;
+  --bg2:     #FFFFFF;
+  --bg3:     #F0F3F8;
+  --card:    #FFFFFF;
+  --card2:   #F5F7FA;
+  --navy:    #FFFFFF;
+
+  --blue:    #1B6CF0;
+  --blue-lt: #2563EB;
+  --cyan:    #0891B2;
+  --green:   #16A34A;
+  --red:     #DC2626;
+  --amber:   #D97706;
+
+  --border:  rgba(15, 23, 42, 0.08);
+  --border2: rgba(27, 108, 240, 0.2);
+
+  --text:    #0F172A;
+  --text2:   #475569;
+  --text3:   #94A3B8;
+
+  --sidebar-bg:   #0F172A;
+  --sidebar-text: rgba(255, 255, 255, 0.65);
+
+  --row-hover: rgba(15, 23, 42, 0.03);
+  --shadow:    0 1px 4px rgba(15, 23, 42, 0.06);
+}
+
+/* ══════════════════════════════════
+   SHARED VARIABLES (same in both themes)
+══════════════════════════════════ */
+:root {
+  --font: 'Syne', system-ui, sans-serif;
+  --body: 'DM Sans', system-ui, sans-serif;
+  --mono: 'JetBrains Mono', monospace;
 }
 
 html {
@@ -44,30 +91,32 @@ body {
   -webkit-font-smoothing: antialiased;
   overflow-x: hidden;
   line-height: 1.6;
+  transition: background-color 0.2s ease, color 0.2s ease;
 }
 
-/* Grid background */
+/* Grid background — subtle in both themes */
 body::before {
   content: '';
   position: fixed;
   inset: 0;
   background-image:
-    linear-gradient(rgba(27, 127, 255, 0.03) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(27, 127, 255, 0.03) 1px, transparent 1px);
+    linear-gradient(var(--border) 1px, transparent 1px),
+    linear-gradient(90deg, var(--border) 1px, transparent 1px);
   background-size: 60px 60px;
   pointer-events: none;
   z-index: 0;
+  opacity: 0.5;
 }
 
 /* Gradient text utility */
 .gradient-text {
-  background: linear-gradient(135deg, #1B7FFF 0%, #00D4FF 100%);
+  background: linear-gradient(135deg, var(--blue) 0%, var(--cyan) 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
 }
 
-/* Scroll reveal */
+/* Scroll reveal animations */
 .reveal {
   opacity: 0;
   transform: translateY(24px);
@@ -81,11 +130,11 @@ body::before {
 .reveal-delay-2 { transition-delay: 0.2s; }
 .reveal-delay-3 { transition-delay: 0.3s; }
 
-/* Animations */
 @keyframes pulse {
   0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(0, 212, 255, 0.4); }
   50%       { opacity: 0.7; box-shadow: 0 0 0 6px rgba(0, 212, 255, 0); }
 }
+@keyframes spin { to { transform: rotate(360deg) } }
 @keyframes blink {
   0%, 100% { opacity: 1; }
   50%       { opacity: 0; }
@@ -93,3 +142,15 @@ body::before {
 
 .pulse-dot { animation: pulse 2s ease infinite; }
 .blink     { animation: blink 1s step-end infinite; }
+
+/* Inputs adapt placeholder color to theme */
+input::placeholder,
+textarea::placeholder {
+  color: var(--text3);
+}
+
+/* Scrollbar theming */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: var(--bg2); }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 5px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text3); }

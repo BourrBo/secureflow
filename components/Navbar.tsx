@@ -1,5 +1,6 @@
 'use client'
 import Link from 'next/link'
+import ThemeToggle from './ThemeToggle'
 
 export default function Navbar() {
   return (
@@ -12,7 +13,7 @@ export default function Navbar() {
         zIndex: 100,
         backdropFilter: 'blur(20px)',
         WebkitBackdropFilter: 'blur(20px)',
-        background: 'rgba(3,8,15,0.85)',
+        background: 'var(--bg)cc',
         borderBottom: '1px solid var(--border)',
       }}
     >
@@ -57,7 +58,7 @@ export default function Navbar() {
               }}
               onMouseEnter={(e) => {
                 e.currentTarget.style.color = 'var(--text)'
-                e.currentTarget.style.background = 'rgba(255,255,255,0.05)'
+                e.currentTarget.style.background = 'var(--row-hover)'
               }}
               onMouseLeave={(e) => {
                 e.currentTarget.style.color = 'var(--text2)'
@@ -69,8 +70,11 @@ export default function Navbar() {
           ))}
         </div>
 
-        {/* Right CTA */}
+        {/* Right side */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          {/* Theme toggle */}
+          <ThemeToggle compact />
+
           <Link
             href="/login"
             style={{

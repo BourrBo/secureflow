@@ -2,6 +2,7 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import ThemeToggle from '@/components/ThemeToggle'
 
 const navSections = [
   {
@@ -43,8 +44,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       <aside style={{
         width: collapsed ? 60 : 220,
         flexShrink: 0,
-        background: 'var(--navy, #050E1F)',
-        borderRight: '1px solid rgba(255,255,255,0.06)',
+        background: 'var(--sidebar-bg)',
+        borderRight: '1px solid var(--border)',
         display: 'flex', flexDirection: 'column',
         transition: 'width 0.2s ease',
         overflow: 'hidden',
@@ -71,7 +72,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           )}
         </div>
 
-        {/* Collapse expand button when collapsed */}
         {collapsed && (
           <button onClick={() => setCollapsed(false)} style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.3)', cursor: 'pointer', fontSize: 14, padding: '8px', width: '100%', textAlign: 'center' }}>→</button>
         )}
@@ -132,6 +132,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               })}
             </div>
           ))}
+        </div>
+
+        {/* Theme toggle row */}
+        <div style={{ padding: collapsed ? '10px 0' : '10px 14px', borderTop: '1px solid rgba(255,255,255,0.06)', display: 'flex', justifyContent: collapsed ? 'center' : 'flex-start', flexShrink: 0 }}>
+          <ThemeToggle compact />
         </div>
 
         {/* User footer */}
