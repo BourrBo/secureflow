@@ -123,12 +123,13 @@ export default function SASTPage() {
         line:        item.line        || 0,
         description: item.description || '',
         rule:        item.rule        || '',
-        cwe:         extractCWE(item.rule?.toLowerCase() || ''),
-        owasp:       extractOWASP(item.rule?.toLowerCase() || ''),
+        cwe:         (item as any).cwe   || extractCWE(item.rule?.toLowerCase() || ''),
+        owasp:       (item as any).owasp || extractOWASP(item.rule?.toLowerCase() || ''),
         status:      'open',
       }))
 
       setFindings(normalized)
+      sessionStorage.setItem('secureflow_findings', JSON.stringify(normalized))
       setHasScanned(true)
       setScanTime(Math.round((Date.now() - startTime) / 1000))
 
@@ -180,12 +181,13 @@ export default function SASTPage() {
         line:        item.line        || 0,
         description: item.description || '',
         rule:        item.rule        || '',
-        cwe:         extractCWE(item.rule?.toLowerCase() || ''),
-        owasp:       extractOWASP(item.rule?.toLowerCase() || ''),
+        cwe:         (item as any).cwe   || extractCWE(item.rule?.toLowerCase() || ''),
+        owasp:       (item as any).owasp || extractOWASP(item.rule?.toLowerCase() || ''),
         status:      'open',
       }))
 
       setFindings(normalized)
+      sessionStorage.setItem('secureflow_findings', JSON.stringify(normalized))
       setHasScanned(true)
       setScanTime(Math.round((Date.now() - startTime) / 1000))
 

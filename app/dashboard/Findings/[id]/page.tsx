@@ -1,15 +1,31 @@
 'use client'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Link from 'next/link'
 
-const findingData: Record<string, {
+// ── Shape coming from the SAST page (sessionStorage) ──
+type RealFinding = {
+  id: number
+  title: string
+  severity: 'critical' | 'high' | 'medium' | 'low'
+  file: string
+  line: number
+  description: string
+  rule: string
+  cwe: string
+  owasp: string
+  status: string
+}
+
+type AdaptedFinding = {
   id: number; name: string; owasp: string; severity: string
   file: string; line: number; cwe: string; cvss: number; epss: number
   scanner: string; branch: string; commit: string; status: string; assignee: string
   description: string; codeLines: { ln: number; code: string; highlight?: boolean }[]
   fixCode: string; tags: string[]; jira: string
   activity: { time: string; msg: string }[]
-}> = {
+}
+
+const findingData: Record<string, AdaptedFinding> = {
   '1': {
     id: 1, name: 'SQL Injection via user input', owasp: 'A03:2021 · Injection',
     severity: 'critical', file: 'routes/user.js', line: 142,
@@ -36,6 +52,36 @@ const findingData: Record<string, {
   },
 }
 
+// ── Convert a real scan finding into the shape this page renders ──
+function adaptRealFinding(real: RealFinding): AdaptedFinding {
+  return {
+    id: real.id,
+    name: real.title,
+    owasp: `${real.owasp} · ${real.rule}`,
+    severity: real.severity,
+    file: real.file,
+    line: real.line,
+    cwe: real.cwe,
+    cvss: 0, // not provided by Semgrep — rendered as N/A, never faked
+    epss: 0, // same
+    scanner: 'Semgrep',
+    branch: '—',
+    commit: '—',
+    status: real.status || 'open',
+    assignee: 'Unassigned',
+    description: real.description,
+    codeLines: [
+      { ln: real.line, code: `// See ${real.file}:${real.line} in your codebase`, highlight: true },
+    ],
+    fixCode: '// Run "Generate Fix" for an AI-suggested remediation',
+    tags: [real.rule, real.cwe, real.severity],
+    jira: '—',
+    activity: [
+      { time: 'Just now', msg: `Finding detected by Semgrep — ${real.rule}` },
+    ],
+  }
+}
+
 const sevConfig: Record<string, { color: string; bg: string; border: string }> = {
   critical: { color: '#FF6B6B', bg: 'rgba(192,55,42,0.15)', border: 'rgba(192,55,42,0.3)' },
   high:     { color: '#FFB020', bg: 'rgba(184,106,0,0.15)', border: 'rgba(184,106,0,0.3)' },
@@ -43,12 +89,35 @@ const sevConfig: Record<string, { color: string; bg: string; border: string }> =
 }
 
 export default function FindingDetailPage({ params }: { params: { id: string } }) {
-  const finding = findingData[params.id] || findingData['1']
-  const sev = sevConfig[finding.severity] || sevConfig.critical
+  const [finding, setFinding] = useState<AdaptedFinding>(findingData['1'])
   const [aiLoading, setAiLoading] = useState(false)
   const [aiShown, setAiShown] = useState(false)
   const [status, setStatus] = useState(finding.status)
   const [copied, setCopied] = useState(false)
+
+  // ── Load real finding from sessionStorage, fall back to mock ──
+  useEffect(() => {
+    const stored = sessionStorage.getItem('secureflow_findings')
+    if (stored) {
+      try {
+        const parsed: RealFinding[] = JSON.parse(stored)
+        const match = parsed.find(f => f.id.toString() === params.id)
+        if (match) {
+          const adapted = adaptRealFinding(match)
+          setFinding(adapted)
+          setStatus(adapted.status)
+          return
+        }
+      } catch {
+        // malformed sessionStorage data — fall through to mock below
+      }
+    }
+    const fallback = findingData[params.id] || findingData['1']
+    setFinding(fallback)
+    setStatus(fallback.status)
+  }, [params.id])
+
+  const sev = sevConfig[finding.severity] || sevConfig.critical
 
   const handleAiFix = () => {
     setAiLoading(true)
@@ -186,7 +255,7 @@ export default function FindingDetailPage({ params }: { params: { id: string } }
                   </p>
                   <div style={{ background: '#040D1A', borderRadius: 8, padding: '12px 14px', fontFamily: 'var(--mono)', fontSize: 12, lineHeight: 1.8, border: '1px solid rgba(0,229,118,0.1)' }}>
                     <div style={{ display: 'flex', gap: 12 }}>
-                      <span style={{ color: 'rgba(255,255,255,0.2)', minWidth: 28, textAlign: 'right' }}>142</span>
+                      <span style={{ color: 'rgba(255,255,255,0.2)', minWidth: 28, textAlign: 'right' }}>{finding.line}</span>
                       <span style={{ color: '#98C56A' }}>{finding.fixCode}</span>
                     </div>
                   </div>
@@ -245,8 +314,8 @@ export default function FindingDetailPage({ params }: { params: { id: string } }
                 { label: 'Status',   value: status === 'resolved' ? '✓ Resolved' : '● Open', color: status === 'resolved' ? '#00E576' : '#FF6B6B' },
                 { label: 'Assignee', value: finding.assignee },
                 { label: 'Scanner',  value: finding.scanner, mono: true },
-                { label: 'CVSS',     value: finding.cvss.toString(), color: '#FF6B6B' },
-                { label: 'EPSS',     value: finding.epss.toString(), color: '#FFB020' },
+                { label: 'CVSS',     value: finding.cvss ? finding.cvss.toString() : 'N/A', color: '#FF6B6B' },
+                { label: 'EPSS',     value: finding.epss ? finding.epss.toString() : 'N/A', color: '#FFB020' },
                 { label: 'Branch',   value: finding.branch, mono: true },
                 { label: 'Commit',   value: finding.commit, mono: true, color: '#4D9FFF' },
                 { label: 'Jira',     value: finding.jira, color: '#4D9FFF' },
