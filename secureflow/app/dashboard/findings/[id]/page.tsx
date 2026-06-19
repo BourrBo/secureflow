@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, use } from 'react'
 import Link from 'next/link'
 
 // ── Shape coming from the SAST page (sessionStorage) ──
@@ -88,7 +88,8 @@ const sevConfig: Record<string, { color: string; bg: string; border: string }> =
   medium:   { color: '#4D9FFF', bg: 'rgba(27,127,255,0.15)', border: 'rgba(27,127,255,0.3)' },
 }
 
-export default function FindingDetailPage({ params }: { params: { id: string } }) {
+export default function FindingDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = use(params)
   const [finding, setFinding] = useState<AdaptedFinding>(findingData['1'])
   const [aiLoading, setAiLoading] = useState(false)
   const [aiShown, setAiShown] = useState(false)
@@ -101,7 +102,7 @@ export default function FindingDetailPage({ params }: { params: { id: string } }
     if (stored) {
       try {
         const parsed: RealFinding[] = JSON.parse(stored)
-        const match = parsed.find(f => f.id.toString() === params.id)
+        const match = parsed.find(f => f.id.toString() === id)
         if (match) {
           const adapted = adaptRealFinding(match)
           setFinding(adapted)
@@ -112,10 +113,10 @@ export default function FindingDetailPage({ params }: { params: { id: string } }
         // malformed sessionStorage data — fall through to mock below
       }
     }
-    const fallback = findingData[params.id] || findingData['1']
+    const fallback = findingData[id] || findingData['1']
     setFinding(fallback)
     setStatus(fallback.status)
-  }, [params.id])
+  }, [id])
 
   const sev = sevConfig[finding.severity] || sevConfig.critical
 
