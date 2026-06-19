@@ -79,7 +79,11 @@ export default function SASTPage() {
   const [selected, setSelected]   = useState<number[]>([])
   const [scanTime, setScanTime]   = useState<number | null>(null)
 
-  // ── Run scan ──
+  // ── Scan mode: GitHub URL vs local zip upload ──
+  const [scanMode, setScanMode]   = useState<'github' | 'local'>('github')
+  const [selectedFile, setSelectedFile] = useState<File | null>(null)
+
+  // ── Run scan (GitHub URL) ──
   const handleScan = async () => {
     if (!repoUrl.trim()) {
       setError('Please enter a GitHub repository URL')
@@ -121,6 +125,65 @@ export default function SASTPage() {
         rule:        item.rule        || '',
         cwe:         extractCWE(item.rule?.toLowerCase() || ''),
         owasp:       extractOWASP(item.rule?.toLowerCase() || ''),
+        status:      'open',
+      }))
+
+      setFindings(normalized)
+      setHasScanned(true)
+      setScanTime(Math.round((Date.now() - startTime) / 1000))
+
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Unknown error'
+      setError(msg)
+    } finally {
+      setScanning(false)
+    }
+  }
+
+  // ── Run scan (local zip upload) ──
+  const handleScanLocal = async () => {
+    if (!selectedFile) {
+      setError('Please select a .zip file to upload')
+      return
+    }
+
+    setScanning(true)
+    setError(null)
+    setFindings([])
+    const startTime = Date.now()
+
+    try {
+      const formData = new FormData()
+      formData.append('file', selectedFile)
+
+      const response = await fetch(`${BACKEND_URL}/api/sast/scan-local`, {
+        method: 'POST',
+        body: formData, // no Content-Type header — browser sets the multipart boundary automatically
+      })
+
+      if (!response.ok) {
+        const errText = await response.text()
+        throw new Error(`Backend error ${response.status}: ${errText}`)
+      }
+
+      const data: BackendFinding[] = await response.json()
+
+      if (!Array.isArray(data)) {
+        throw new Error('Backend did not return an array of findings')
+      }
+
+      const normalized: Finding[] = data.map((item, index) => ({
+        id:          index + 1,
+        title:       item.title       || 'Untitled Finding',
+        severity:    mapSeverity(item.severity),
+        file:        item.file        || 'unknown',
+        line:        item.line        || 0,
+        description: item.description || '',
+        rule:        item.rule        || '',
+        // cwe:         extractCWE(item.rule?.toLowerCase() || ''),
+        // owasp:       extractOWASP(item.rule?.toLowerCase() || ''),
+        cwe:         (item as any).cwe   || 'CWE-000',
+        owasp:       (item as any).owasp || 'A05:2021',
         status:      'open',
       }))
 
@@ -183,28 +246,78 @@ export default function SASTPage() {
           <span style={{ color: '#F0F4FF', fontWeight: 500 }}>SAST Results</span>
         </div>
 
-        {/* Repo URL input */}
-        <input
-          value={repoUrl}
-          onChange={e => setRepoUrl(e.target.value)}
-          onKeyDown={e => e.key === 'Enter' && handleScan()}
-          placeholder="https://github.com/owner/repo"
-          style={{
+        {/* Mode toggle */}
+        <div style={{ display: 'flex', borderRadius: 8, border: '1px solid rgba(255,255,255,0.12)', overflow: 'hidden', flexShrink: 0 }}>
+          {(['github', 'local'] as const).map(mode => (
+            <button
+              key={mode}
+              onClick={() => { setScanMode(mode); setError(null) }}
+              style={{
+                padding: '8px 14px',
+                fontSize: 12,
+                fontWeight: 500,
+                border: 'none',
+                cursor: 'pointer',
+                background: scanMode === mode ? '#1B7FFF' : 'rgba(255,255,255,0.05)',
+                color: scanMode === mode ? '#fff' : 'rgba(255,255,255,0.5)',
+                fontFamily: 'var(--font)',
+              }}
+            >
+              {mode === 'github' ? 'GitHub URL' : 'Upload Local'}
+            </button>
+          ))}
+        </div>
+
+        {/* GitHub URL input */}
+        {scanMode === 'github' && (
+          <input
+            value={repoUrl}
+            onChange={e => setRepoUrl(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && handleScan()}
+            placeholder="https://github.com/owner/repo"
+            style={{
+              flex: 1,
+              padding: '8px 14px',
+              borderRadius: 8,
+              border: '1px solid rgba(255,255,255,0.12)',
+              background: 'rgba(255,255,255,0.05)',
+              color: '#F0F4FF',
+              fontSize: 13,
+              outline: 'none',
+              fontFamily: 'var(--mono)',
+            }}
+          />
+        )}
+
+        {/* Local file picker */}
+        {scanMode === 'local' && (
+          <div style={{
             flex: 1,
-            padding: '8px 14px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            padding: '6px 14px',
             borderRadius: 8,
             border: '1px solid rgba(255,255,255,0.12)',
             background: 'rgba(255,255,255,0.05)',
-            color: '#F0F4FF',
-            fontSize: 13,
-            outline: 'none',
-            fontFamily: 'var(--mono)',
-          }}
-        />
+          }}>
+            <input
+              type="file"
+              accept=".zip"
+              onChange={e => setSelectedFile(e.target.files?.[0] || null)}
+              style={{ fontSize: 12, color: 'rgba(255,255,255,0.6)', flex: 1 }}
+            />
+            {selectedFile && (
+              <span style={{ fontSize: 11, color: '#4D9FFF', fontFamily: 'var(--mono)', whiteSpace: 'nowrap' }}>
+                {selectedFile.name}
+              </span>
+            )}
+          </div>
+        )}
 
         {/* Scan button */}
         <button
-          onClick={handleScan}
+          onClick={scanMode === 'github' ? handleScan : handleScanLocal}
           disabled={scanning}
           style={{
             padding: '9px 20px',
@@ -244,7 +357,7 @@ export default function SASTPage() {
             <div>
               <span style={{ color: '#4D9FFF', fontWeight: 500 }}>Running Semgrep SAST scan...</span>
               <span style={{ color: 'rgba(255,255,255,0.4)', marginLeft: 10 }}>
-                Cloning repo → Running Semgrep → Parsing results
+                {scanMode === 'github' ? 'Cloning repo → Running Semgrep → Parsing results' : 'Extracting upload → Running Semgrep → Parsing results'}
               </span>
             </div>
           </div>
@@ -268,7 +381,7 @@ export default function SASTPage() {
             <span style={{ fontSize: 14 }}>✅</span>
             <span style={{ color: '#00E576', fontWeight: 500 }}>Scan complete!</span>
             <span style={{ color: 'rgba(255,255,255,0.4)' }}>
-              Found {findings.length} findings in {scanTime}s — {repoUrl.split('/').slice(-1)[0]}
+              Found {findings.length} findings in {scanTime}s — {scanMode === 'github' ? repoUrl.split('/').slice(-1)[0] : selectedFile?.name}
             </span>
           </div>
         )}
@@ -281,19 +394,25 @@ export default function SASTPage() {
               Ready to scan
             </div>
             <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.4)', maxWidth: 400, lineHeight: 1.6, marginBottom: 24 }}>
-              Enter a GitHub repository URL above and click <strong style={{ color: '#4D9FFF' }}>Run SAST Scan</strong> to detect security vulnerabilities using Semgrep.
+              {scanMode === 'github' ? (
+                <>Enter a GitHub repository URL above and click <strong style={{ color: '#4D9FFF' }}>Run SAST Scan</strong> to detect security vulnerabilities using Semgrep.</>
+              ) : (
+                <>Select a <strong style={{ color: '#4D9FFF' }}>.zip</strong> file of your project above and click <strong style={{ color: '#4D9FFF' }}>Run SAST Scan</strong> to detect security vulnerabilities using Semgrep.</>
+              )}
             </div>
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
-              {['https://github.com/pallets/flask', 'https://github.com/django/django', 'https://github.com/expressjs/express'].map(url => (
-                <button
-                  key={url}
-                  onClick={() => setRepoUrl(url)}
-                  style={{ padding: '6px 12px', borderRadius: 6, border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.04)', color: 'rgba(255,255,255,0.5)', fontSize: 11, cursor: 'pointer', fontFamily: 'var(--mono)' }}
-                >
-                  {url.replace('https://github.com/', '')}
-                </button>
-              ))}
-            </div>
+            {scanMode === 'github' && (
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
+                {['https://github.com/pallets/flask', 'https://github.com/django/django', 'https://github.com/expressjs/express'].map(url => (
+                  <button
+                    key={url}
+                    onClick={() => setRepoUrl(url)}
+                    style={{ padding: '6px 12px', borderRadius: 6, border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.04)', color: 'rgba(255,255,255,0.5)', fontSize: 11, cursor: 'pointer', fontFamily: 'var(--mono)' }}
+                  >
+                    {url.replace('https://github.com/', '')}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
