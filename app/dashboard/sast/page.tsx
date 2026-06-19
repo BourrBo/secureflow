@@ -180,10 +180,8 @@ export default function SASTPage() {
         line:        item.line        || 0,
         description: item.description || '',
         rule:        item.rule        || '',
-        // cwe:         extractCWE(item.rule?.toLowerCase() || ''),
-        // owasp:       extractOWASP(item.rule?.toLowerCase() || ''),
-        cwe:         (item as any).cwe   || 'CWE-000',
-        owasp:       (item as any).owasp || 'A05:2021',
+        cwe:         extractCWE(item.rule?.toLowerCase() || ''),
+        owasp:       extractOWASP(item.rule?.toLowerCase() || ''),
         status:      'open',
       }))
 
@@ -291,28 +289,98 @@ export default function SASTPage() {
 
         {/* Local file picker */}
         {scanMode === 'local' && (
-          <div style={{
-            flex: 1,
-            display: 'flex',
-            alignItems: 'center',
-            gap: 10,
-            padding: '6px 14px',
-            borderRadius: 8,
-            border: '1px solid rgba(255,255,255,0.12)',
-            background: 'rgba(255,255,255,0.05)',
-          }}>
+          <label
+            htmlFor="sast-zip-upload"
+            style={{
+              flex: 1,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 10,
+              padding: '6px 8px',
+              borderRadius: 8,
+              border: `1px solid ${selectedFile ? 'rgba(27,127,255,0.35)' : 'rgba(255,255,255,0.12)'}`,
+              background: 'rgba(255,255,255,0.05)',
+              cursor: 'pointer',
+              transition: 'border-color .15s',
+            }}
+            onMouseEnter={e => { if (!selectedFile) e.currentTarget.style.borderColor = 'rgba(255,255,255,0.25)' }}
+            onMouseLeave={e => { if (!selectedFile) e.currentTarget.style.borderColor = 'rgba(255,255,255,0.12)' }}
+          >
+            {/* Hidden native input — label triggers it */}
             <input
+              id="sast-zip-upload"
               type="file"
               accept=".zip"
               onChange={e => setSelectedFile(e.target.files?.[0] || null)}
-              style={{ fontSize: 12, color: 'rgba(255,255,255,0.6)', flex: 1 }}
+              style={{ display: 'none' }}
             />
+
+            {/* Fake "button" half */}
+            <span style={{
+              flexShrink: 0,
+              padding: '5px 12px',
+              borderRadius: 6,
+              background: 'rgba(27,127,255,0.15)',
+              color: '#4D9FFF',
+              fontSize: 11,
+              fontWeight: 600,
+              fontFamily: 'var(--font)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+            }}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="17 8 12 3 7 8" />
+                <line x1="12" y1="3" x2="12" y2="15" />
+              </svg>
+              Choose .zip
+            </span>
+
+            {/* Filename or placeholder */}
+            <span style={{
+              fontSize: 12,
+              color: selectedFile ? '#F0F4FF' : 'rgba(255,255,255,0.3)',
+              fontFamily: 'var(--mono)',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+              flex: 1,
+            }}>
+              {selectedFile ? selectedFile.name : 'No file selected'}
+            </span>
+
+            {/* Size badge + clear button, only when a file is chosen */}
             {selectedFile && (
-              <span style={{ fontSize: 11, color: '#4D9FFF', fontFamily: 'var(--mono)', whiteSpace: 'nowrap' }}>
-                {selectedFile.name}
-              </span>
+              <>
+                <span style={{
+                  flexShrink: 0,
+                  fontSize: 10,
+                  color: 'rgba(255,255,255,0.35)',
+                  fontFamily: 'var(--mono)',
+                }}>
+                  {(selectedFile.size / 1024 / 1024).toFixed(1)} MB
+                </span>
+                <button
+                  onClick={e => { e.preventDefault(); e.stopPropagation(); setSelectedFile(null) }}
+                  style={{
+                    flexShrink: 0,
+                    background: 'none',
+                    border: 'none',
+                    color: 'rgba(255,255,255,0.3)',
+                    cursor: 'pointer',
+                    fontSize: 14,
+                    padding: '0 4px',
+                    lineHeight: 1,
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.color = '#FF6B6B' }}
+                  onMouseLeave={e => { e.currentTarget.style.color = 'rgba(255,255,255,0.3)' }}
+                >
+                  ✕
+                </button>
+              </>
             )}
-          </div>
+          </label>
         )}
 
         {/* Scan button */}
