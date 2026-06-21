@@ -1,11 +1,12 @@
 'use client'
-import { useState, useEffect, use } from 'react'
+import { useState, useEffect } from 'react'
+import { useParams } from 'next/navigation'
 import Link from 'next/link'
 
 // ── Shape coming from the SAST page (sessionStorage) ──
 type RealFinding = {
   id: number
-  title: string
+  title: string 
   severity: 'critical' | 'high' | 'medium' | 'low'
   file: string
   line: number
@@ -88,12 +89,13 @@ const sevConfig: Record<string, { color: string; bg: string; border: string }> =
   medium:   { color: '#4D9FFF', bg: 'rgba(27,127,255,0.15)', border: 'rgba(27,127,255,0.3)' },
 }
 
-export default function FindingDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = use(params)
-  const [finding, setFinding] = useState<AdaptedFinding>(findingData['1'])
+export default function FindingDetailPage() {
+  const params = useParams()
+  const id = params?.id?.toString() || ''
+  const [finding, setFinding] = useState<AdaptedFinding | null>(null)
   const [aiLoading, setAiLoading] = useState(false)
   const [aiShown, setAiShown] = useState(false)
-  const [status, setStatus] = useState(finding.status)
+  const [status, setStatus] = useState('open')
   const [copied, setCopied] = useState(false)
 
   // ── Load real finding from sessionStorage, fall back to mock ──
@@ -113,10 +115,38 @@ export default function FindingDetailPage({ params }: { params: Promise<{ id: st
         // malformed sessionStorage data — fall through to mock below
       }
     }
-    const fallback = findingData[id] || findingData['1']
+    const fallback = findingData[id] || null
     setFinding(fallback)
-    setStatus(fallback.status)
+    setStatus(fallback?.status ?? 'open')
   }, [id])
+
+  if (!finding) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', fontFamily: 'var(--body)' }}>
+        <div style={{ height: 56, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 20px', borderBottom: '1px solid rgba(255,255,255,0.06)', background: 'var(--bg)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'rgba(255,255,255,0.35)' }}>
+            <Link href="/dashboard" style={{ color: 'rgba(255,255,255,0.35)', textDecoration: 'none' }}>Dashboard</Link>
+            <span>/</span>
+            <Link href="/dashboard/sast" style={{ color: 'rgba(255,255,255,0.35)', textDecoration: 'none' }}>SAST</Link>
+            <span>/</span>
+            <span style={{ color: '#F0F4FF', fontWeight: 500 }}>Finding not found</span>
+          </div>
+          <Link href="/dashboard/sast" style={{ padding: '7px 12px', borderRadius: 7, border: '1px solid rgba(255,255,255,0.1)', background: 'transparent', color: 'rgba(255,255,255,0.5)', fontSize: 12, textDecoration: 'none' }}>
+            ← Back
+          </Link>
+        </div>
+        <div style={{ flex: 1, overflowY: 'auto', padding: 20, background: 'rgba(6,13,24,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ textAlign: 'center', color: 'rgba(255,255,255,0.6)' }}>
+            <div style={{ fontSize: 48, marginBottom: 16 }}>⚠</div>
+            <div style={{ fontSize: 18, fontWeight: 600, color: '#F0F4FF', marginBottom: 8 }}>Finding not found</div>
+            <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.35)', maxWidth: 420, margin: '0 auto' }}>
+              The requested finding ID does not exist in session data or mock fixtures. Return to the SAST results list and select a valid finding.
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   const sev = sevConfig[finding.severity] || sevConfig.critical
 
