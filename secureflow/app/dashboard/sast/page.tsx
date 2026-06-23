@@ -129,7 +129,8 @@ export default function SASTPage() {
       }))
 
       setFindings(normalized)
-      sessionStorage.setItem('secureflow_findings', JSON.stringify(normalized))
+      // sessionStorage.setItem('secureflow_findings', JSON.stringify(normalized))
+      localStorage.setItem('secureflow_findings', JSON.stringify(normalized))
       setHasScanned(true)
       setScanTime(Math.round((Date.now() - startTime) / 1000))
 
@@ -187,7 +188,8 @@ export default function SASTPage() {
       }))
 
       setFindings(normalized)
-      sessionStorage.setItem('secureflow_findings', JSON.stringify(normalized))
+      // sessionStorage.setItem('secureflow_findings', JSON.stringify(normalized))
+      localStorage.setItem('secureflow_findings', JSON.stringify(normalized))
       setHasScanned(true)
       setScanTime(Math.round((Date.now() - startTime) / 1000))
 

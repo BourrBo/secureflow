@@ -100,7 +100,8 @@ export default function FindingDetailPage() {
 
   // ── Load real finding from sessionStorage, fall back to mock ──
   useEffect(() => {
-    const stored = sessionStorage.getItem('secureflow_findings')
+    // const stored = sessionStorage.getItem('secureflow_findings')
+    const stored = localStorage.getItem('secureflow_findings')
     if (stored) {
       try {
         const parsed: RealFinding[] = JSON.parse(stored)
