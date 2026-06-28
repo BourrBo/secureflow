@@ -15,4 +15,10 @@ class Finding(BaseModel):
     rule: str
     cwe: str = "CWE-000"
     owasp: str = "A05:2021"
+    scanner: str = "semgrep"
     code_context: List[CodeLine] = []
+    # SCA-only fields — left as None for SAST (Semgrep) findings
+    installed_version: Optional[str] = None
+    fixed_version: Optional[str] = None
+    cvss: Optional[float] = None
+    ecosystem: Optional[str] = None

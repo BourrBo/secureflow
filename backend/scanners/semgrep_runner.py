@@ -19,4 +19,17 @@ def run_semgrep(repo_path: str):
         errors="ignore"
     )
 
-    return json.loads(result.stdout)
+    if not result.stdout:
+        stderr = result.stderr.strip() or "<no stderr>"
+        raise RuntimeError(
+            f"Semgrep produced no output (exit code {result.returncode}). "
+            f"stderr={stderr}"
+        )
+
+    try:
+        return json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(
+            f"Failed to parse Semgrep JSON output: {exc}. "
+            f"stderr={result.stderr.strip() or '<no stderr>'}"
+        )

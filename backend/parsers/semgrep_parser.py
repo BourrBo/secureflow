@@ -45,6 +45,7 @@ def normalize_findings(data):
             "rule": result["check_id"],
             "cwe": cwe,
             "owasp": owasp,
+            "scanner": "semgrep",
             "code_context": get_code_context(result["path"], start_line, end_line),
         })
 

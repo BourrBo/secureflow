@@ -8,7 +8,10 @@ from models.finding import Finding
 from models.scan_request import ScanRequest
 
 from scanners.semgrep_runner import run_semgrep
+from scanners.trivy_runner import run_trivy
+
 from parsers.semgrep_parser import normalize_findings
+from parsers.trivy_parser import normalize_trivy_findings
 
 from services.git_service import (
     clone_repo,
@@ -30,11 +33,15 @@ def scan(request: ScanRequest):
 
         repo_path = clone_repo(request.repo_url)
 
-        raw_results = run_semgrep(repo_path)
+        # SAST — scans your own source code for vulnerability patterns
+        semgrep_results = run_semgrep(repo_path)
+        semgrep_findings = normalize_findings(semgrep_results)
 
-        findings = normalize_findings(raw_results)
+        # SCA — scans dependency manifests/lockfiles for known CVEs
+        trivy_results = run_trivy(repo_path)
+        trivy_findings = normalize_trivy_findings(trivy_results)
 
-        return findings
+        return semgrep_findings + trivy_findings
 
     except Exception as e:
 
@@ -48,6 +55,7 @@ def scan(request: ScanRequest):
         if repo_path:
             cleanup_repo(repo_path)
 
+
 @router.post(
     "/api/sast/scan-local",
     response_model=List[Finding]
@@ -56,9 +64,14 @@ def scan_local(file: UploadFile = File(...)):
     extract_path = None
     try:
         extract_path = save_and_extract_zip(file)
-        raw_results = run_semgrep(extract_path)
-        findings = normalize_findings(raw_results)
-        return findings
+
+        semgrep_results = run_semgrep(extract_path)
+        semgrep_findings = normalize_findings(semgrep_results)
+
+        trivy_results = run_trivy(extract_path)
+        trivy_findings = normalize_trivy_findings(trivy_results)
+
+        return semgrep_findings + trivy_findings
     except Exception as e:
         raise HTTPException(
             status_code=500,
