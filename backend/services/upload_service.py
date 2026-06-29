@@ -3,8 +3,14 @@ import zipfile
 import os
 import shutil
 
+# Same fix as git_service.py — keep temp folders on the backend's own drive.
+_BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+_TMP_ROOT = os.path.join(_BASE_DIR, "..", "tmp_scans")
+os.makedirs(_TMP_ROOT, exist_ok=True)
+
+
 def save_and_extract_zip(uploaded_file) -> str:
-    temp_dir = tempfile.mkdtemp()
+    temp_dir = tempfile.mkdtemp(dir=_TMP_ROOT)
     zip_path = os.path.join(temp_dir, "upload.zip")
 
     with open(zip_path, "wb") as f:
