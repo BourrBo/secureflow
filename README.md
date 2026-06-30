@@ -96,29 +96,98 @@ Interactive API docs (Swagger UI) are available at `/docs` once the backend is r
 
 ## Local setup
 
-### Backend
+These are the exact commands used to get this project running on Windows (PowerShell). Run everything from inside the `backend/` folder unless noted otherwise.
 
-```bash
-cd backend
+### 1. Create and activate the virtual environment
+
+```powershell
 python -m venv venv
-venv\Scripts\activate          # Windows
-# source venv/bin/activate     # macOS/Linux
 
-pip install fastapi "uvicorn[standard]" pydantic python-multipart gitpython semgrep checkov
+# Allows the activation script to run in this terminal session only
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+
+# Make sure pip itself is available inside the venv
+python -m ensurepip --upgrade
+
+# Confirm activate.ps1 exists
+dir .\venv\Scripts\
+
+# Activate the venv — your prompt should now show (venv) at the start
+.\venv\Scripts\Activate.ps1
 ```
 
-Trivy is installed separately (it's a standalone binary, not a pip package):
+Every command after this point assumes the venv is active. If you close and reopen your terminal, re-run `.\venv\Scripts\Activate.ps1` before continuing.
 
-- **Windows:** `winget install AquaSecurity.trivy`
-- **Linux/WSL2:** `curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin`
+### 2. Install the core backend (FastAPI) — required for every module
 
-Run the server:
+```powershell
+python -m pip install fastapi uvicorn
+```
 
-```bash
+`python-multipart` is also required — without it, both `/scan-local` (zip upload) endpoints fail with a 500 error:
+
+```powershell
+pip install python-multipart
+```
+
+`sqlalchemy` and `gitpython` are used by `services/git_service.py` and any future persistence work:
+
+```powershell
+pip install sqlalchemy gitpython
+```
+
+### 3. SAST — install Semgrep
+
+```powershell
+python -m pip install semgrep
+```
+
+Verify it installed correctly:
+```powershell
+semgrep --version
+```
+
+> **Known issue:** Windows Smart App Control has been observed blocking `semgrep.exe` with `OSError: [WinError 4551] An Application Control policy has blocked this file`. See "Known environment notes" below if you hit this.
+
+### 4. SCA — install Trivy
+
+Trivy is **not** a Python package — it's a standalone binary, installed separately from `pip`:
+
+```powershell
+winget install AquaSecurity.trivy
+```
+
+If `winget` isn't available, use Chocolatey instead:
+```powershell
+choco install trivy
+```
+
+Or download manually from the [Trivy releases page](https://github.com/aquasecurity/trivy/releases), extract `trivy.exe`, and add its folder to your system `PATH`.
+
+Verify it installed correctly (open a **new** terminal window first, so it picks up the updated `PATH`):
+```powershell
+trivy --version
+```
+
+### 5. IaC — install Checkov
+
+```powershell
+pip install checkov
+```
+
+Checkov is pure Python, so this installs cleanly with no extra steps and no Smart App Control issues.
+
+### 6. Secrets — no install needed
+
+The secret-detection module (`backend/secret_detection/`) is custom-built with no external CLI tool and no extra dependencies beyond what's already installed in step 2.
+
+### 7. Run the backend
+
+```powershell
 uvicorn main:app --reload
 ```
 
-Backend runs at `http://127.0.0.1:8000`. Swagger UI at `http://127.0.0.1:8000/docs`.
+Backend runs at `http://127.0.0.1:8000`. Swagger UI (interactive API docs, useful for testing each endpoint manually) is at `http://127.0.0.1:8000/docs`.
 
 ### Frontend
 
@@ -129,6 +198,30 @@ npm run dev
 ```
 
 Frontend runs at `http://localhost:3000`.
+
+### Linux / WSL2 equivalent
+
+If developing inside WSL2 (recommended — see "Known environment notes" below), the same steps look like this instead:
+
+```bash
+cd backend
+python3 -m venv venv
+source venv/bin/activate
+
+pip install fastapi uvicorn python-multipart sqlalchemy gitpython semgrep checkov
+
+# Trivy — standalone binary, Linux install script
+curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+
+# Verify
+semgrep --version
+trivy --version
+checkov --version
+
+uvicorn main:app --reload
+```
+
+WSL2 automatically forwards `localhost` ports to Windows, so the frontend (run normally on Windows) and Swagger UI in your Windows browser work exactly as described above with no extra configuration.
 
 ## Known environment notes
 
