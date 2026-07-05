@@ -1,6 +1,7 @@
 'use client'
 import { useState } from 'react'
 import Link from 'next/link'
+import { ISO27001Badge, ViewStandardLink, ExportReportButton } from '@/components/dashboard/ISO27001'
 
 // ── Types matching your backend response ──
 type BackendFinding = {
@@ -23,6 +24,9 @@ type Finding = {
   cwe:         string
   owasp:       string
   status:      string
+  iso27001Control:     string
+  iso27001ControlName: string
+  iso27001Description: string
 }
 
 // ── Map backend severity → SecureFlow severity ──
@@ -57,6 +61,23 @@ function extractOWASP(rule: string): string {
   if (rule.includes('path'))       return 'A01:2021'
   if (rule.includes('exec'))       return 'A03:2021'
   return 'A05:2021'
+}
+
+// ── Fallback ISO/IEC 27001:2022 Annex A mapping if backend doesn't send one ──
+function extractISO(rule: string): { control: string; name: string; description: string } {
+  if (rule.includes('hardcode') || rule.includes('secret')) {
+    return { control: '5.17', name: 'Authentication information', description: 'Allocation and management of authentication information shall be controlled by a management process, including advising personnel on appropriate handling of authentication information.' }
+  }
+  if (rule.includes('auth')) {
+    return { control: '8.5', name: 'Secure authentication', description: 'Secure authentication technologies and procedures shall be implemented based on information access restrictions and the topic-specific policy on access control.' }
+  }
+  if (rule.includes('crypto')) {
+    return { control: '8.24', name: 'Use of cryptography', description: 'Rules for the effective use of cryptography, including cryptographic key management, shall be defined and implemented.' }
+  }
+  if (rule.includes('csrf')) {
+    return { control: '8.26', name: 'Application security requirements', description: 'Information security requirements shall be identified, specified and approved when developing or acquiring applications.' }
+  }
+  return { control: '8.28', name: 'Secure coding', description: 'Secure coding principles shall be applied to software development.' }
 }
 
 // ── Severity config ──
@@ -126,6 +147,9 @@ export default function SASTPage() {
         cwe:         (item as any).cwe   || extractCWE(item.rule?.toLowerCase() || ''),
         owasp:       (item as any).owasp || extractOWASP(item.rule?.toLowerCase() || ''),
         status:      'open',
+        iso27001Control:     (item as any).iso27001_control      || extractISO(item.rule?.toLowerCase() || '').control,
+        iso27001ControlName: (item as any).iso27001_control_name || extractISO(item.rule?.toLowerCase() || '').name,
+        iso27001Description: (item as any).iso27001_description  || extractISO(item.rule?.toLowerCase() || '').description,
       }))
 
       setFindings(normalized)
@@ -185,6 +209,9 @@ export default function SASTPage() {
         cwe:         (item as any).cwe   || extractCWE(item.rule?.toLowerCase() || ''),
         owasp:       (item as any).owasp || extractOWASP(item.rule?.toLowerCase() || ''),
         status:      'open',
+        iso27001Control:     (item as any).iso27001_control      || extractISO(item.rule?.toLowerCase() || '').control,
+        iso27001ControlName: (item as any).iso27001_control_name || extractISO(item.rule?.toLowerCase() || '').name,
+        iso27001Description: (item as any).iso27001_description  || extractISO(item.rule?.toLowerCase() || '').description,
       }))
 
       setFindings(normalized)
@@ -247,6 +274,20 @@ export default function SASTPage() {
           <span>/</span>
           <span style={{ color: '#F0F4FF', fontWeight: 500 }}>SAST Results</span>
         </div>
+
+        <div style={{ flexShrink: 0 }}><ViewStandardLink /></div>
+        <ExportReportButton
+          findings={findings.map(f => ({
+            title: f.title, severity: f.severity, file: f.file, line: f.line,
+            description: f.description, rule: f.rule, cwe: f.cwe, owasp: f.owasp,
+            scanner: 'semgrep',
+            iso27001_control: f.iso27001Control,
+            iso27001_control_name: f.iso27001ControlName,
+            iso27001_description: f.iso27001Description,
+          }))}
+          scanType="sast"
+          repoLabel={scanMode === 'github' ? repoUrl : (selectedFile?.name || '')}
+        />
 
         {/* Mode toggle */}
         <div style={{ display: 'flex', borderRadius: 8, border: '1px solid rgba(255,255,255,0.12)', overflow: 'hidden', flexShrink: 0 }}>
@@ -536,9 +577,9 @@ export default function SASTPage() {
               </div>
 
               {/* Table header */}
-              <div style={{ display: 'grid', gridTemplateColumns: '36px 3fr 90px 2fr 80px 80px 50px', padding: '9px 16px', borderBottom: '1px solid rgba(255,255,255,0.06)', background: 'rgba(255,255,255,0.02)' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '36px 3fr 90px 2fr 80px 80px 70px 50px', padding: '9px 16px', borderBottom: '1px solid rgba(255,255,255,0.06)', background: 'rgba(255,255,255,0.02)' }}>
                 <div />
-                {['Vulnerability', 'Severity', 'File · Line', 'CWE', 'OWASP', ''].map(h => (
+                {['Vulnerability', 'Severity', 'File · Line', 'CWE', 'OWASP', 'ISO 27001', ''].map(h => (
                   <div key={h} style={{ fontSize: 10, fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.5px', color: 'rgba(255,255,255,0.3)' }}>{h}</div>
                 ))}
               </div>
@@ -556,7 +597,7 @@ export default function SASTPage() {
                 const isSelected = selected.includes(f.id)
                 return (
                   <div key={f.id}
-                    style={{ display: 'grid', gridTemplateColumns: '36px 3fr 90px 2fr 80px 80px 50px', padding: '11px 16px', alignItems: 'center', borderBottom: i < filtered.length - 1 ? '1px solid rgba(255,255,255,0.04)' : 'none', background: isSelected ? 'rgba(27,127,255,0.06)' : 'transparent', transition: 'background .12s' }}
+                    style={{ display: 'grid', gridTemplateColumns: '36px 3fr 90px 2fr 80px 80px 70px 50px', padding: '11px 16px', alignItems: 'center', borderBottom: i < filtered.length - 1 ? '1px solid rgba(255,255,255,0.04)' : 'none', background: isSelected ? 'rgba(27,127,255,0.06)' : 'transparent', transition: 'background .12s' }}
                     onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = 'rgba(255,255,255,0.02)' }}
                     onMouseLeave={e => { if (!isSelected) e.currentTarget.style.background = 'transparent' }}
                   >
@@ -586,6 +627,11 @@ export default function SASTPage() {
 
                     {/* OWASP */}
                     <div style={{ fontSize: 10, fontFamily: 'var(--mono)', color: 'rgba(255,255,255,0.4)' }}>{f.owasp}</div>
+
+                    {/* ISO 27001 */}
+                    <div>
+                      <ISO27001Badge info={{ control: f.iso27001Control, controlName: f.iso27001ControlName, description: f.iso27001Description }} />
+                    </div>
 
                     {/* View */}
                     <Link href={`/dashboard/findings/${f.id}`}

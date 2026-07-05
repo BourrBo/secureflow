@@ -1,6 +1,7 @@
 'use client'
 import { useState } from 'react'
 import Link from 'next/link'
+import { ISO27001Badge, ViewStandardLink, ExportReportButton } from '@/components/dashboard/ISO27001'
 
 // ── Shape coming back from the backend (shared Finding model — SAST + SCA mixed) ──
 type BackendFinding = {
@@ -17,6 +18,9 @@ type BackendFinding = {
   fixed_version?:     string | null
   cvss?:              number | null
   ecosystem?:         string | null
+  iso27001_control?:      string
+  iso27001_control_name?: string
+  iso27001_description?:  string
 }
 
 type Dependency = {
@@ -31,6 +35,9 @@ type Dependency = {
   file:              string
   description:       string
   cwe:               string
+  iso27001Control:     string
+  iso27001ControlName: string
+  iso27001Description: string
 }
 
 // ── Map Trivy's severity scale → SecureFlow's display scale ──
@@ -83,6 +90,9 @@ export default function SCAPage() {
         file: item.file || 'unknown',
         description: item.description || '',
         cwe: item.cwe || 'CWE-000',
+        iso27001Control:     item.iso27001_control      || '8.8',
+        iso27001ControlName: item.iso27001_control_name || 'Management of technical vulnerabilities',
+        iso27001Description: item.iso27001_description  || "Information about technical vulnerabilities of information systems in use shall be obtained, the organization's exposure to such vulnerabilities shall be evaluated and appropriate measures shall be taken.",
       }))
   }
 
@@ -200,6 +210,24 @@ export default function SCAPage() {
           <span>/</span>
           <span style={{ color: '#F0F4FF', fontWeight: 500 }}>SCA Results</span>
         </div>
+
+        <div style={{ flexShrink: 0 }}><ViewStandardLink /></div>
+        <ExportReportButton
+          findings={dependencies.map(d => ({
+            title: d.name, severity: d.severity, file: d.file, line: 0,
+            description: d.description, rule: d.cve, cwe: d.cwe, owasp: 'A06:2021',
+            scanner: 'trivy',
+            iso27001_control: d.iso27001Control,
+            iso27001_control_name: d.iso27001ControlName,
+            iso27001_description: d.iso27001Description,
+            installed_version: d.installedVersion,
+            fixed_version: d.fixedVersion,
+            cvss: d.cvss,
+            ecosystem: d.ecosystem,
+          }))}
+          scanType="sca"
+          repoLabel={scanMode === 'github' ? repoUrl : (selectedFile?.name || '')}
+        />
 
         <div style={{ display: 'flex', borderRadius: 8, border: '1px solid rgba(255,255,255,0.12)', overflow: 'hidden', flexShrink: 0 }}>
           {(['github', 'local'] as const).map(mode => (
@@ -380,8 +408,8 @@ export default function SCAPage() {
                 ))}
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 90px 100px 100px 1.3fr 70px 80px', padding: '9px 16px', borderBottom: '1px solid rgba(255,255,255,0.06)', background: 'rgba(255,255,255,0.02)' }}>
-                {['Package', 'Ecosystem', 'Installed', 'Fix In', 'CVE', 'CVSS', 'Severity'].map(h => (
+              <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 80px 90px 90px 1.1fr 60px 70px 80px', padding: '9px 16px', borderBottom: '1px solid rgba(255,255,255,0.06)', background: 'rgba(255,255,255,0.02)' }}>
+                {['Package', 'Ecosystem', 'Installed', 'Fix In', 'CVE', 'CVSS', 'Severity', 'ISO 27001'].map(h => (
                   <div key={h} style={{ fontSize: 10, fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.5px', color: 'rgba(255,255,255,0.3)' }}>{h}</div>
                 ))}
               </div>
@@ -397,7 +425,7 @@ export default function SCAPage() {
                 return (
                   <div key={dep.id}
                     title={dep.description}
-                    style={{ display: 'grid', gridTemplateColumns: '1.6fr 90px 100px 100px 1.3fr 70px 80px', padding: '11px 16px', alignItems: 'center', borderBottom: i < filtered.length - 1 ? '1px solid rgba(255,255,255,0.04)' : 'none' }}
+                    style={{ display: 'grid', gridTemplateColumns: '1.4fr 80px 90px 90px 1.1fr 60px 70px 80px', padding: '11px 16px', alignItems: 'center', borderBottom: i < filtered.length - 1 ? '1px solid rgba(255,255,255,0.04)' : 'none' }}
                     onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.02)' }}
                     onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
                   >
@@ -422,6 +450,9 @@ export default function SCAPage() {
                       <span style={{ fontSize: 10, fontWeight: 500, padding: '2px 8px', borderRadius: 10, background: sev.bg, color: sev.color }}>
                         {sev.label}
                       </span>
+                    </div>
+                    <div>
+                      <ISO27001Badge info={{ control: dep.iso27001Control, controlName: dep.iso27001ControlName, description: dep.iso27001Description }} />
                     </div>
                   </div>
                 )

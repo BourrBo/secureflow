@@ -1,3 +1,6 @@
+from mappings.iso27001 import get_iso_control
+
+
 def _extract_cvss_score(vuln: dict):
     """Trivy nests CVSS scores per vendor source (ghsa, redhat, nvd, etc).
     Just take the first V3Score we find — good enough for display purposes."""
@@ -22,6 +25,8 @@ def normalize_trivy_findings(data):
             cwe_ids = vuln.get("CweIDs", [])
             cwe = cwe_ids[0] if cwe_ids else "CWE-000"
 
+            iso = get_iso_control(cwe=cwe, scanner="trivy")
+
             findings.append({
                 "title": vuln.get("PkgName", "Unknown Package"),
                 "severity": vuln.get("Severity", "UNKNOWN"),
@@ -32,6 +37,9 @@ def normalize_trivy_findings(data):
                 "cwe": cwe,
                 "owasp": "A06:2021",
                 "scanner": "trivy",
+                "iso27001_control": iso["id"],
+                "iso27001_control_name": iso["name"],
+                "iso27001_description": iso["description"],
                 "installed_version": vuln.get("InstalledVersion"),
                 "fixed_version": vuln.get("FixedVersion"),
                 "cvss": _extract_cvss_score(vuln),

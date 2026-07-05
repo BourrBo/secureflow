@@ -1,6 +1,7 @@
 'use client'
 import { useState } from 'react'
 import Link from 'next/link'
+import { ISO27001Badge, ViewStandardLink, ExportReportButton } from '@/components/dashboard/ISO27001'
 
 // ── Shape coming back from the backend (shared Finding model — mixed scanners) ──
 type BackendFinding = {
@@ -13,6 +14,9 @@ type BackendFinding = {
   cwe:         string
   owasp:       string
   scanner:     string   // "semgrep" | "trivy" | "checkov" | "secrets" — we only keep "secrets" here
+  iso27001_control?:      string
+  iso27001_control_name?: string
+  iso27001_description?:  string
 }
 
 type Secret = {
@@ -25,6 +29,9 @@ type Secret = {
   file:             string
   line:             number
   cwe:              string
+  iso27001Control:     string
+  iso27001ControlName: string
+  iso27001Description: string
 }
 
 function mapSeverity(raw: string): Secret['severity'] {
@@ -96,6 +103,9 @@ export default function SecretsPage() {
         file: item.file || 'unknown',
         line: item.line || 0,
         cwe: item.cwe || 'CWE-798',
+        iso27001Control:     item.iso27001_control      || '5.17',
+        iso27001ControlName: item.iso27001_control_name || 'Authentication information',
+        iso27001Description: item.iso27001_description  || 'Allocation and management of authentication information shall be controlled by a management process, including advising personnel on appropriate handling of authentication information.',
       }))
   }
 
@@ -187,6 +197,32 @@ export default function SecretsPage() {
           <span>/</span>
           <span style={{ color: '#F0F4FF', fontWeight: 500 }}>Secrets Detection</span>
         </div>
+
+        <div style={{ flexShrink: 0 }}><ViewStandardLink /></div>
+        <ExportReportButton
+          findings={secrets.map(s => ({
+            title: s.type, severity: s.severity, file: s.file, line: s.line,
+            description: `Secret detected (matched: ${s.redactedMatch})`,
+            rule: s.ruleId, cwe: s.cwe, owasp: 'A02:2021', scanner: 'secrets',
+            iso27001_control: s.iso27001Control,
+            iso27001_control_name: s.iso27001ControlName,
+            iso27001_description: s.iso27001Description,
+          }))}
+          scanType="secrets"
+          repoLabel={scanMode === 'github' ? repoUrl : (selectedFile?.name || '')}
+        />
+        <ExportReportButton
+          findings={secrets.map(s => ({
+            title: s.type, severity: s.severity, file: s.file, line: s.line,
+            description: `Secret detected — redacted match: ${s.redactedMatch}`,
+            rule: s.ruleId, cwe: s.cwe, owasp: 'A02:2021', scanner: 'secrets',
+            iso27001_control: s.iso27001Control,
+            iso27001_control_name: s.iso27001ControlName,
+            iso27001_description: s.iso27001Description,
+          }))}
+          scanType="secrets"
+          repoLabel={scanMode === 'github' ? repoUrl : (selectedFile?.name || '')}
+        />
 
         <div style={{ display: 'flex', borderRadius: 8, border: '1px solid rgba(255,255,255,0.12)', overflow: 'hidden', flexShrink: 0 }}>
           {(['github', 'local'] as const).map(mode => (
@@ -371,8 +407,8 @@ export default function SecretsPage() {
                 ))}
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1.8fr 1.6fr 1.4fr 110px 90px 80px', padding: '9px 16px', borderBottom: '1px solid rgba(255,255,255,0.06)', background: 'rgba(255,255,255,0.02)' }}>
-                {['Secret Type', 'File · Line', 'Redacted Match', 'Detection', 'CWE', 'Severity'].map(h => (
+              <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 1.4fr 1.2fr 100px 80px 80px 80px', padding: '9px 16px', borderBottom: '1px solid rgba(255,255,255,0.06)', background: 'rgba(255,255,255,0.02)' }}>
+                {['Secret Type', 'File · Line', 'Redacted Match', 'Detection', 'CWE', 'Severity', 'ISO 27001'].map(h => (
                   <div key={h} style={{ fontSize: 10, fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.5px', color: 'rgba(255,255,255,0.3)' }}>{h}</div>
                 ))}
               </div>
@@ -388,7 +424,7 @@ export default function SecretsPage() {
                 const method = methodConfig[s.detectionMethod] || methodConfig.entropy
                 return (
                   <div key={s.id}
-                    style={{ display: 'grid', gridTemplateColumns: '1.8fr 1.6fr 1.4fr 110px 90px 80px', padding: '11px 16px', alignItems: 'center', borderBottom: i < filtered.length - 1 ? '1px solid rgba(255,255,255,0.04)' : 'none' }}
+                    style={{ display: 'grid', gridTemplateColumns: '1.6fr 1.4fr 1.2fr 100px 80px 80px 80px', padding: '11px 16px', alignItems: 'center', borderBottom: i < filtered.length - 1 ? '1px solid rgba(255,255,255,0.04)' : 'none' }}
                     onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.02)' }}
                     onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
                   >
@@ -408,6 +444,9 @@ export default function SecretsPage() {
                       <span style={{ fontSize: 10, fontWeight: 500, padding: '2px 8px', borderRadius: 10, background: sev.bg, color: sev.color }}>
                         {sev.label}
                       </span>
+                    </div>
+                    <div>
+                      <ISO27001Badge info={{ control: s.iso27001Control, controlName: s.iso27001ControlName, description: s.iso27001Description }} />
                     </div>
                   </div>
                 )

@@ -1,3 +1,6 @@
+from mappings.iso27001 import get_iso_control
+
+
 def normalize_iac_findings(data: dict) -> list:
     """
     Checkov output can be:
@@ -22,6 +25,8 @@ def normalize_iac_findings(data: dict) -> list:
             line_range = check.get("file_line_range", [0, 0])
             line = line_range[0] if line_range else 0
 
+            iso = get_iso_control(cwe="CWE-732", scanner="checkov")
+
             findings.append({
                 "title":       check.get("check_id", "UNKNOWN"),
                 "severity":    _map_severity(check.get("severity")),
@@ -33,6 +38,9 @@ def normalize_iac_findings(data: dict) -> list:
                 "cwe":         "CWE-732",   # misconfiguration default
                 "owasp":       "A05:2021",  # Security Misconfiguration
                 "scanner":     "checkov",
+                "iso27001_control": iso["id"],
+                "iso27001_control_name": iso["name"],
+                "iso27001_description": iso["description"],
             })
 
     return findings

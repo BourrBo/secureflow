@@ -6,6 +6,7 @@ treat all four scanners uniformly via the `scanner` field.
 """
 
 from secret_detection.scanner import ScanResult
+from mappings.iso27001 import get_iso_control
 
 
 # Secret detection findings don't map to a single CWE — leave the mapping
@@ -32,6 +33,9 @@ def normalize_secret_findings(result: ScanResult):
     findings = []
 
     for f in result.findings:
+        cwe = _CWE_BY_RULE.get(f.rule_id, "CWE-798")
+        iso = get_iso_control(cwe=cwe, scanner="secrets")
+
         findings.append({
             "title": f.rule_id,
             "severity": f.severity.value,  # already lowercase: critical/high/medium/low
@@ -39,9 +43,12 @@ def normalize_secret_findings(result: ScanResult):
             "line": f.line,
             "description": f.description + f" (matched: {f.match})",
             "rule": f.rule_id,
-            "cwe": _CWE_BY_RULE.get(f.rule_id, "CWE-798"),  # CWE-798: Use of Hard-coded Credentials
+            "cwe": cwe,  # CWE-798: Use of Hard-coded Credentials
             "owasp": "A02:2021",  # Cryptographic Failures — closest OWASP Top 10 bucket for exposed secrets
             "scanner": "secrets",
+            "iso27001_control": iso["id"],
+            "iso27001_control_name": iso["name"],
+            "iso27001_description": iso["description"],
         })
 
     return findings

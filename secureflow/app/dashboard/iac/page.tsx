@@ -1,6 +1,7 @@
 'use client'
 import { useState, useRef } from 'react'
 import Link from 'next/link'
+import { ISO27001Badge, ViewStandardLink, ExportReportButton } from '@/components/dashboard/ISO27001'
 
 // ── Types ──────────────────────────────────────────────────────────
 interface Finding {
@@ -13,6 +14,9 @@ interface Finding {
   cwe: string
   owasp: string
   scanner: string
+  iso27001_control?:      string
+  iso27001_control_name?: string
+  iso27001_description?:  string
 }
 
 // ── Severity / status config ───────────────────────────────────────
@@ -152,6 +156,12 @@ export default function IaCPage() {
           <span style={{ color: '#F0F4FF', fontWeight: 500 }}>IaC Security</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <ViewStandardLink />
+          <ExportReportButton
+            findings={(findings || []) as any[]}
+            scanType="iac"
+            repoLabel={scanMode === 'github' ? repoUrl : (fileName || '')}
+          />
           <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)', fontFamily: 'var(--mono)' }}>
             powered by Checkov
           </span>
@@ -324,8 +334,8 @@ export default function IaCPage() {
               </div>
 
               {/* Header */}
-              <div style={{ display: 'grid', gridTemplateColumns: '2fr 2.5fr 1.5fr 80px 90px 80px', padding: '9px 16px', borderBottom: '1px solid rgba(255,255,255,0.06)', background: 'rgba(255,255,255,0.02)' }}>
-                {['Check ID / Rule', 'Description', 'File · Line', 'Category', 'CWE', 'Severity'].map(h => (
+              <div style={{ display: 'grid', gridTemplateColumns: '1.8fr 2.2fr 1.3fr 70px 70px 80px 80px', padding: '9px 16px', borderBottom: '1px solid rgba(255,255,255,0.06)', background: 'rgba(255,255,255,0.02)' }}>
+                {['Check ID / Rule', 'Description', 'File · Line', 'Category', 'CWE', 'Severity', 'ISO 27001'].map(h => (
                   <div key={h} style={{ fontSize: 10, fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.5px', color: 'rgba(255,255,255,0.3)' }}>{h}</div>
                 ))}
               </div>
@@ -342,7 +352,7 @@ export default function IaCPage() {
                   const desc = f.description.replace(/^FAILED — /, '').replace(/^PASSED — /, '')
                   return (
                     <div key={i}
-                      style={{ display: 'grid', gridTemplateColumns: '2fr 2.5fr 1.5fr 80px 90px 80px', padding: '12px 16px', alignItems: 'start', borderBottom: i < filtered.length - 1 ? '1px solid rgba(255,255,255,0.04)' : 'none', transition: 'background .12s' }}
+                      style={{ display: 'grid', gridTemplateColumns: '1.8fr 2.2fr 1.3fr 70px 70px 80px 80px', padding: '12px 16px', alignItems: 'start', borderBottom: i < filtered.length - 1 ? '1px solid rgba(255,255,255,0.04)' : 'none', transition: 'background .12s' }}
                       onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.02)')}
                       onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
                     >
@@ -374,6 +384,15 @@ export default function IaCPage() {
                         <span style={{ fontSize: 10, fontWeight: 500, padding: '2px 7px', borderRadius: 4, background: sev.bg, color: sev.color }}>
                           {f.severity}
                         </span>
+                      </div>
+
+                      {/* ISO 27001 */}
+                      <div>
+                        <ISO27001Badge info={{
+                          control: f.iso27001_control || '8.9',
+                          controlName: f.iso27001_control_name || 'Configuration management',
+                          description: f.iso27001_description || 'Configurations, including security configurations, of hardware, software, services and networks shall be established, documented, implemented, monitored and reviewed.',
+                        }} />
                       </div>
                     </div>
                   )
