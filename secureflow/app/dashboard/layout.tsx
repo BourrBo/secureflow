@@ -1,6 +1,7 @@
 'use client'
 import { useState } from 'react'
 import Link from 'next/link'
+import Image from 'next/image'
 import { usePathname } from 'next/navigation'
 
 // Dashboard is ALWAYS dark — theme toggle only affects homepage
@@ -71,7 +72,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         <div style={{ padding: '0 14px', height: 56, display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: `1px solid ${D.border}`, flexShrink: 0 }}>
           {!collapsed && (
             <Link href="/" style={{ display: 'flex', alignItems: 'center', gap: 9, textDecoration: 'none' }}>
-              <div style={{ width: 28, height: 28, background: D.blue, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--font)', fontSize: 11, fontWeight: 800, color: '#fff', flexShrink: 0 }}>SF</div>
+              <Image src="/favicon.ico" alt="SecureFlow" width={28} height={28} style={{ borderRadius: 6, flexShrink: 0 }} />
               <span style={{ fontFamily: 'var(--font)', fontSize: 14, fontWeight: 700, color: '#fff', whiteSpace: 'nowrap' }}>
                 Secure<span style={{ color: D.blueLt }}>Flow</span>
               </span>
@@ -79,7 +80,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           )}
           {collapsed && (
             <Link href="/" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', textDecoration: 'none' }}>
-              <div style={{ width: 28, height: 28, background: D.blue, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--font)', fontSize: 11, fontWeight: 800, color: '#fff' }}>SF</div>
+              <Image src="/favicon.ico" alt="SecureFlow" width={28} height={28} style={{ borderRadius: 6 }} />
             </Link>
           )}
           {!collapsed && (

@@ -1,6 +1,7 @@
 'use client'
 import { useState } from 'react'
 import Link from 'next/link'
+import Image from 'next/image'
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState('')
@@ -27,7 +28,7 @@ export default function ForgotPasswordPage() {
         {/* Logo */}
         <div style={{ textAlign: 'center', marginBottom: 36 }}>
           <Link href="/" style={{ display: 'inline-flex', alignItems: 'center', gap: 10, textDecoration: 'none' }}>
-            <div style={{ width: 34, height: 34, background: 'var(--blue)', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--font)', fontSize: 13, fontWeight: 800, color: '#fff' }}>SF</div>
+            <Image src="/favicon.ico" alt="SecureFlow" width={34} height={34} style={{ borderRadius: 8 }} />
             <span style={{ fontFamily: 'var(--font)', fontSize: 17, fontWeight: 700, color: 'var(--text)' }}>
               Secure<span style={{ color: 'var(--blue)' }}>Flow</span>
             </span>

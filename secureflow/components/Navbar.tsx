@@ -1,5 +1,6 @@
 'use client'
 import Link from 'next/link'
+import Image from 'next/image'
 import ThemeToggle from './ThemeToggle'
 
 export default function Navbar() {
@@ -13,7 +14,7 @@ export default function Navbar() {
 
         {/* Logo */}
         <Link href="/" style={{ display: 'flex', alignItems: 'center', gap: 10, textDecoration: 'none', flexShrink: 0 }}>
-          <div style={{ width: 34, height: 34, background: 'var(--blue)', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--font)', fontSize: 13, fontWeight: 800, color: '#fff' }}>SF</div>
+          <Image src="/favicon.ico" alt="SecureFlow" width={34} height={34} style={{ borderRadius: 8 }} />
           <span style={{ fontFamily: 'var(--font)', fontSize: 17, fontWeight: 700, color: 'var(--text)' }}>
             Secure<span style={{ color: 'var(--blue)' }}>Flow</span>
           </span>
