@@ -1,135 +1,239 @@
-|(ee)|7<br>:<br> © txt_to_imgipynb|7<br>:<br> © txt_to_imgipynb|7<br>:<br> © txt_to_imgipynb|7<br>:<br> © txt_to_imgipynb|A<br> wG&|||SB||s|2 Share||@)|
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-||File|Edit|View<br>Insert||Runtime|Tools<br>Help<br>x|||||||=|
-|Q Commands|||+|Code<br>~|+ Text|p> Runall|~||||“ a||yo“|
-|a<br>:a||a||Ipip install diffusers transformers accelerate torch torchvision|||||||V7|i||
-|fa)|a|||!pip install matplotlib||||||||||
-|<>|v|=||Requirement <br>Requirement|already <br>already|satisfied: <br>satisfied:|diffusers in /usr/local/lib/python3.12/dist-packages (@.38.8)<br>transformers<br>in /usr/local/lib/python3.12/dist-packages<br>(5.12.8)|||||||
-|||||Requirement|already|satisfied:|accelerate<br>in /usr/local/lib/python3.12/dist-packages<br>(1.14.0)|||||||
-|©<br>Lote||||Requirement <br>Requirement|already <br> already|satisfied: <br> satisfied:|torch in /usr/local/lib/python3.12/dist-packages<br>(2.11.8+cpu)<br>torchvision<br>in /usr/local/lib/python3.12/dist-packages<br>(@.26.8+cpu)|||||||
-|\O=r||||Requirement <br>Requirement|already <br> already|satisfied: <br> satisfied:|importlib_metadata in /usr/local/lib/python3.12/dist-packages (from diffusers) <br>filelock<br>in<br>/usr/local/lib/python3.12/dist-packages (from diffusers)<br>(3.29.3)|(8.7.1)||||||
-|||||Requirement|already|satisfied:|httpx<1.0.@ in /usr/local/lib/python3.12/dist-packages<br>(from diffusers)<br>(@.28.1)|||||||
-|Oo||||Requirement <br>Requirement|already <br> already|satisfied: <br> satisfied:|huggingface-hub<2.0,>=8.34.0 in /usr/local/lib/python3.12/dist-packages (from diffusers) (1.19.6)<br>numpy<br>in /usr/local/lib/python3.12/dist-packages<br>(from diffusers)<br>(2.8.2)|||||||
-|&||||**Requirement**|**already**|**satisfied:**|**re**pex!=2619.12.17 in /usr/local/lib/python3.12/dist-packages (from diffusers**)** (2625.11.3)<br>quests<br>in<br>fusr/local/lib/python3.12/dist-packages (from diffusers)<br>(2.32.4|||||||
-|||||Requirement|already|satisfied:|safetensors>=6.8.6-re.@ in /usr/local/lib/python3.12/dist-packages<br>(from diffusers)|||(6.8.6)||||
-|||||Requirement|already|satisfied:|Pillow in /usr/local/lib/python3.12/dist-packages<br>(from diffusers)<br>(11.3.8)|||||||
-|||||Requirement|already|satisfied:|packaging>=28.@ in /usr/local/lib/python3.12/dist-packages<br>(from transformers)|(26.2)||||||
-|||||Requirement|already|satisfied:|pyyaml>=5.1<br>in /usr/local/1lib/python3.12/dist-packages<br>(from transformers)<br>(6.6.3)|||||||
-|||||Requirement|already|satisfied:|tokenizers<=@.23.8,>=@.22.8 in /usr/local/lib/python3.12/dist-packages<br>(from transformers)||||(8.22.2)|||
-|||||Requirement|already|satisfied:|typer<br>in /usr/local/lib/python3.12/dist-packages<br>(from transformers)<br>(8.25.1)|||||||
-|||||Requirement|already|satisfied:|tqdm>=4.68<br>in fusr/local/lib/python3.12/dist-packages<br>(from transformers)<br>(4.67.3)|||||||
-|||||Requirement|already|satisfied:|psutil<br>in /usr/local/lib/python3.12/dist-packages<br>(from accelerate)<br>(5.9.5)|||||||
-|||||Requirement|already|satisfied:|typing-extensions>=4.18.6<br>in /usr/local/lib/python3.12/dist-packages<br>(from torch)||(4.15.6)|||||
-|||||Requirement|already|satisfied:|setuptools<82 in /usr/local/1lib/python3.12/dist-packages<br>(from torch)<br>(75.2.8)|||||||
-|||||Requirement|already|satisfied:|sympy>=1.13.3<br>in /usr/local/lib/python3.12/dist-packages<br>(from torch)<br>(1.14.8)|||||||
-|||||Requirement|already|satisfied:|networkx>=2.5.1 in /usr/local/lib/python3.12/dist-packages<br>(from torch)<br>(3.6.1)|||||||
-|||||Requirement|already|satisfied:|jinja2<br>in /usr/local/lib/python3.12/dist-packages<br>(from torch)<br>(3.1.6)|||||||
-|||||Requirement|already|satisfied:|fsspec>=@.8.5 in /usr/local/lib/python3.12/dist-packages<br>(from torch)<br>(2025.3.0)|||||||
-|||||Reouirement|already|satisfied:|anvin<br>in<br>/usr/local/lih/ovthon3.13/dist-nackases<br>(from<br>httnx<1_8-a->diffusers)|(4.13.a1||||||
+# SecureFlow
 
+SecureFlow is an enterprise application security platform that aggregates multiple security scanners — static analysis, dependency scanning, infrastructure-as-code scanning, and secret detection — into a single unified dashboard.
 
+A FastAPI backend orchestrates the underlying scanning tools and normalizes their output into one shared finding format. A Next.js frontend presents results per scanner, with a unified `Finding` shape so every module behaves consistently (same severity scale, same filtering, same table layout).
 
-€} Variables 62) Terminal 
+## Current status
 
-+ Executing (57s) 4 Python3 
+Four scanning modules are built and working end-to-end (backend + frontend, both verified against real repositories with real findings):
 
-COeg, Gtxteeto imaipynbne PY + & —E {s3 aa, Share (a)_ File Edit View Insert Runtime Tools Help = = Q Commands + Code ~ + Text > Runall ~ i RAMEe vA REYULD MEME aileauy SaLisiieu. pypal sitipe—2.3.4 411 fUSl yy LULaLy Livy py LNW. 12) ULSL“PalLhapes (Iu meatpiuiiiuy (a.a.2; ==— a ww. RequirementRequirement alreadyalready satisfied:satisfied: python-dateutil>=2.7six>=1.5 in /usr/local/lib/python3.12/dist-packagesin /usr/local/1lib/python3.12/dist-packages(from python-dateutil>=2.7->matplotlib)(from matplotlib) (2.9. (1.1/.8)+ 7 WW: <> Parree[2] & importfromdiffuserstorch importip StableDiffusionPipelinePp import matplotlib.pyplot as plt rt @# Use a simpler, more compatible model print("Loading Stable Diffusion vi-5...") v ‘es WARNING: torchao.kernel.intmm:Warning: Detected no triton, on systems without Triton certain kernels will not work & Flax classes are deprecated and will be removed in Diffusers v1.6.6. We recommend migrating to PyTorch classes or pinning your version of Dif Flax classes are deprecated and will be removed in Diffusers v1.8.8. We recommend migrating to PyTorch classes or pinning your version of Dif Loading Stable Diffusion vi-5... 
+| Module | Tool | What it scans |
+|---|---|---|
+| **SAST** | [Semgrep](https://semgrep.dev/) | Your own source code, for vulnerability patterns (SQL injection, XSS, insecure requests, etc.) |
+| **SCA** | [Trivy](https://aquasecurity.github.io/trivy/) | Dependency manifests/lockfiles (`package-lock.json`, `requirements.txt`, etc.) for known CVEs |
+| **IaC** | [Checkov](https://www.checkov.io/) | Terraform, CloudFormation, Kubernetes, and Dockerfile misconfigurations |
+| **Secrets** | Custom regex + entropy engine | Hardcoded credentials — AWS keys, GitHub/GitLab/Slack/Stripe/OpenAI tokens, private keys, JWTs, DB connection strings, plus generic high-entropy string detection for anything not matching a known vendor format |
 
-BI 
+Remaining dashboard pages (Container Scan, DAST, Compliance, Projects, Reports, Settings) are still UI-only placeholders with hardcoded mock data — not yet wired to a backend.
 
-tpey: Pipe = StableDiffusionPipeline.from_pretrained(model_id) device = "cuda" if torch.cuda.is_available{) else "cpu" pipe = pipe.to(device) print(t"Model loaded successfully on {device}!") 
+## Architecture
 
-print(f"Error: {e}") 
+```
+secureflow/
+├── backend/                  FastAPI backend
+│   ├── main.py                App entrypoint, CORS, router registration
+│   ├── models/
+│   │   ├── finding.py          Shared Finding schema used by all 4 scanners
+│   │   └── scan_request.py     Request body for GitHub-URL-based scans
+│   ├── routes/
+│   │   ├── sast.py              /api/sast/*  and /api/iac/*  endpoints
+│   │   └── secrets.py           /api/secrets/* endpoints
+│   ├── scanners/                Thin subprocess wrappers around each CLI tool
+│   │   ├── semgrep_runner.py
+│   │   ├── trivy_runner.py
+│   │   └── iac_scanner.py        (runs Checkov)
+│   ├── secret_detection/         Custom-built scanner (no external CLI dependency)
+│   │   ├── rules.py               14 vendor-specific regex patterns
+│   │   ├── entropy.py             Shannon entropy scoring for unknown secret formats
+│   │   └── scanner.py             Directory walker + finding orchestration
+│   ├── parsers/                  Normalize each tool's raw output into the shared Finding shape
+│   │   ├── semgrep_parser.py
+│   │   ├── trivy_parser.py
+│   │   ├── iac_parser.py
+│   │   └── secrets_parser.py
+│   └── services/
+│       ├── git_service.py         Clones a GitHub repo into backend/tmp_scans/
+│       └── upload_service.py      Extracts an uploaded .zip into backend/tmp_scans/
+│
+└── secureflow/                app/ (Next.js)
+    └── app/dashboard/
+        ├── sast/page.tsx
+        ├── sca/page.tsx
+        ├── iac/page.tsx
+        ├── secrets/page.tsx
+        └── findings/[id]/page.tsx   Shared finding detail view
+```
 
-v /usr/local/lib/python3.12/dist-packages/huggingface_hub/utils/_auth.py:124: UserWarning: The secret “HF_TOKEN does not exist in your Colab secrets. 
+## The shared `Finding` model
 
-€} Variables 
+Every scanner's raw output gets normalized into the same shape before it reaches the frontend, so the UI doesn't need scanner-specific logic to render results:
 
-62) Terminal 
+```python
+class Finding(BaseModel):
+    title: str
+    severity: str          # scanner-specific scale, mapped per-scanner on the frontend
+    file: str
+    line: int
+    description: str
+    rule: str               # e.g. a Semgrep rule ID, a CVE, a Checkov check ID, or a secret rule ID
+    cwe: str = "CWE-000"
+    owasp: str = "A05:2021"
+    scanner: str = "semgrep"  # "semgrep" | "trivy" | "checkov" | "secrets"
+    code_context: List[CodeLine] = []
+    # SCA-only fields, left null for everything else
+    installed_version: Optional[str] = None
+    fixed_version: Optional[str] = None
+    cvss: Optional[float] = None
+    ecosystem: Optional[str] = None
+```
 
-**==> picture [8 x 13] intentionally omitted <==**
+Each frontend dashboard page calls the same scan endpoint pattern, then filters the response by `scanner` to show only the findings relevant to that page (e.g. the SCA page keeps only `scanner === "trivy"`).
 
-**----- Start of picture text -----**<br>
-+<br>**----- End of picture text -----**<br>
+## API endpoints
 
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/api/sast/scan` | Clone a GitHub repo, run Semgrep + Trivy, return merged findings |
+| `POST` | `/api/sast/scan-local` | Same, from an uploaded `.zip` |
+| `POST` | `/api/iac/scan` | Clone a GitHub repo, run Checkov, return findings |
+| `POST` | `/api/iac/scan-local` | Same, from an uploaded `.zip` |
+| `POST` | `/api/secrets/scan` | Clone a GitHub repo, run the secret scanner, return findings |
+| `POST` | `/api/secrets/scan-local` | Same, from an uploaded `.zip` |
+| `GET` | `/` | Health check |
 
-Executing (1m 14s) & Python3 
+Interactive API docs (Swagger UI) are available at `/docs` once the backend is running.
 
-CoOere, & txtaeriilinsto imgipynbPY *# a —E {s3 aa, Share = File Edit View Insert Runtime Tools Help = = Q Commands + Code ~ + Text > Runall ~ i RAMEeEe vA nr [oe ae eee — ea pipe = StableDiffusionPipeline.from_pretrained(model_id) device = “cuda” if torch.cuda.is_available() else “cpu” <> pipe = pipe.to(device) print(f"Model loaded successfully on {device}!") rt except Exceptionas e: print(f"Error: {e}") es /usr/local/lib/python3.12/dist-packages/huggingface_hub/utils/_auth.py:124: UserWarning The secret "HF_TOKEN does not exist in your Colab secrets. [=] To authenticate with the Hugging Face Hub, create a token in your settings tab (https://huggingface.co/settings/tokens), set it as secret in You will be able to reuse this secret in all of your notebooks & Pleasewarnings.warn(note that authentication is recommended but still optional te access public models or datasets. model_indexjson: 100% 541/541 [00:00<00:00, 8.10kB/s] Download complete: 100% §.48G/5.48G [02:50<00:00, 38.9MB/s] Fetching 15 files: 100% 15/15 [02:48<00:00, 12.45s/it} Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads. WARNING: huggingface_hub.utils. http:Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher r Loading pipeline components...;: 100% 7/7 [00:03<00;00, 3.16it/s] Loading weights: 100% 196/196 [00:00<00:00, 624.34it/s] Loading weights: 100% 396/396 [00:00<00:00, 942 45it/s] Model loaded successfully on cpu €} Variables 62) Terminal + Executing (32s) [4 Python3 
+## Local setup
 
-**==> picture [119 x 39] intentionally omitted <==**
+These are the exact commands used to get this project running on Windows (PowerShell). Run everything from inside the `backend/` folder unless noted otherwise.
 
-**----- Start of picture text -----**<br>
-—E {s3 aa, Share (a)=<br>=<br>i RAMEeEe vA<br>**----- End of picture text -----**<br>
+### 1. Create and activate the virtual environment
 
+```powershell
+python -m venv venv
 
-|Cr<br>(ee)|©<br>File|txt_to_img.ipynb<br>*%7 &<br>txt_to_ ne PY<br>Edit<br>View<br>Insert<br>Runtime<br>Tools|txt_to_img.ipynb<br>*%7 &<br>txt_to_ ne PY<br>Edit<br>View<br>Insert<br>Runtime<br>Tools|txt_to_img.ipynb<br>*%7 &<br>txt_to_ ne PY<br>Edit<br>View<br>Insert<br>Runtime<br>Tools|txt_to_img.ipynb<br>*%7 &<br>txt_to_ ne PY<br>Edit<br>View<br>Insert<br>Runtime<br>Tools|txt_to_img.ipynb<br>*%7 &<br>txt_to_ ne PY<br>Edit<br>View<br>Insert<br>Runtime<br>Tools||Help|Help|||—E|{s3|&,|Share|i<br>(a)<br>=|
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-|Q Commands|||=<br>+ Code|||~<br>+ Text<br>> Runall|||~|||||i|RAM<br>Ee|vA|
-|—_|||Loading|||weights: 100%|||||396/396 [00:00<00:00, 942 45it/s]||||||
-|~|||||||||||||||||
-||we||Model||loaded successfully on|||cpu|||||||||
-|<>|a<br>j||def|generate_simple(prompt):|||||||||||||
-|||||s""Simple<br>image<br>generation|||||function"™""||||||||
-|7||||try:|||||||||||||
-|aR||||||image<br>=<br>pipet|||||||||||
-|||||||prompt,|||||||||||
-|CF||||||num_inference_steps=24,|||||||||||
-|||||||guidance _scale=7.5,|||||||||||
-|Oo||||||width=512,|||||||||||
-|||||||height=512|||||||||||
-|&||||||). images [0]|||||||||||
-|||||||plt.figure(figsize=(8,|||8))||||||||
-|||||||plt.imshow( image)|||||||||||
-|||||||plt.axis(‘off")|||||||||||
-|||||||plt.title( prompt)|||||||||||
-|||||||plt.show()|||||||||||
-|||||||return image|||||||||||
-|||||except Exception<br>as<br>e:|||||||||||||
-|||||||print(f"Generation|error:|||{e}")|||||||
-|||||||return<br>None|||||||||||
-||[5]||# Test|||‘=<br>.<br>the<br>simple<br>versicn|||||||||||
-|€}|Variables||62)Terminal||||||||+||Executing|(43s)|[}|Python3|
+# Allows the activation script to run in this terminal session only
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 
+# Make sure pip itself is available inside the venv
+python -m ensurepip --upgrade
 
+# Confirm activate.ps1 exists
+dir .\venv\Scripts\
 
-|la<br>a<br>(ee)|la<br>a<br>(ee)|&<br>File|txt_to_img.ipynb<br>*<br>@<br>tx _to_img.ipy b w&<br>Edit<br>View<br>Insert<br>Runtime<br>Tools|txt_to_img.ipynb<br>*<br>@<br>tx _to_img.ipy b w&<br>Edit<br>View<br>Insert<br>Runtime<br>Tools|txt_to_img.ipynb<br>*<br>@<br>tx _to_img.ipy b w&<br>Edit<br>View<br>Insert<br>Runtime<br>Tools|txt_to_img.ipynb<br>*<br>@<br>tx _to_img.ipy b w&<br>Edit<br>View<br>Insert<br>Runtime<br>Tools|Help|Help|||=|$63|2. Share|Sa<br>(=~)<br>=|
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-|Q|Commands|||+ Code|~|+ Text<br>> Runall||~|||||nee a|vA|
-|—||By||||plt.figure(figsize=(8,||8))|||||||
-|—||Mia||||plt.imshow(image)|||||||||
-|Q||||||plt.axis(<br>o**f**")<br>plt.title(prompt)|||||||||
-|||||||plt.show()|||||||||
-|<>||||||return image|||||||||
-|©<br>Be||||except Exception as e:<br>print(f"Generation|||error:||{e}")||||||
-||O=]|||||||||||||||
-|[=]||[5]||te<br>#<br>Test|!<br>the<br>simple<br>version||||||||||
-|||||generate_simple("ninja")|||||||||||
-|||=||5%||||||1/20[01:32<29:17,92.53s/it]|||||
+# Activate the venv — your prompt should now show (venv) at the start
+.\venv\Scripts\Activate.ps1
+```
 
+Every command after this point assumes the venv is active. If you close and reopen your terminal, re-run `.\venv\Scripts\Activate.ps1` before continuing.
 
+### 2. Install the core backend (FastAPI) — required for every module
 
-€} Variables 
+```powershell
+python -m pip install fastapi uvicorn
+```
 
-**==> picture [8 x 13] intentionally omitted <==**
+`python-multipart` is also required — without it, both `/scan-local` (zip upload) endpoints fail with a 500 error:
 
-**----- Start of picture text -----**<br>
-+<br>**----- End of picture text -----**<br>
+```powershell
+pip install python-multipart
+```
 
+`sqlalchemy` and `gitpython` are used by `services/git_service.py` and any future persistence work:
 
-Executing (Im 36s) } Python3 
+```powershell
+pip install sqlalchemy gitpython
+```
 
-62) Terminal 
+### 3. SAST — install Semgrep
 
-**==> picture [304 x 325] intentionally omitted <==**
+```powershell
+python -m pip install semgrep
+```
 
-**----- Start of picture text -----**<br>
-COPe, © txt_to_img.ipynbtt_to_imo.ipy *% &<br>File Edit View Insert Runtime Tools Help<br>2 ;<br>Q Commands + Code ~ + Text > Runall ~<br>_— [4] return image<br>fa) exceptprint(#"GenerationException as e: error: {e}"}<br>return None<br><><br>kJ generate_simple("ninja")<br>Bi<br>}<br>(i #<br>aot . |<br>= j<br>_—<br>a<br>i /|<br>€} Variables 62) Terminal +<br>**----- End of picture text -----**<br>
+Verify it installed correctly:
+```powershell
+semgrep --version
+```
 
+> **Known issue:** Windows Smart App Control has been observed blocking `semgrep.exe` with `OSError: [WinError 4551] An Application Control policy has blocked this file`. See "Known environment notes" below if you hit this.
 
-**==> picture [119 x 325] intentionally omitted <==**
+### 4. SCA — install Trivy
 
-**----- Start of picture text -----**<br>
-—E {s3 aa, Share (a)sai<br>-<br>,<br>bikRAM vy OA<br>a vi:<br>~ 5:02PM & Python3<br>**----- End of picture text -----**<br>
+Trivy is **not** a Python package — it's a standalone binary, installed separately from `pip`:
 
+```powershell
+winget install AquaSecurity.trivy
+```
 
+If `winget` isn't available, use Chocolatey instead:
+```powershell
+choco install trivy
+```
+
+Or download manually from the [Trivy releases page](https://github.com/aquasecurity/trivy/releases), extract `trivy.exe`, and add its folder to your system `PATH`.
+
+Verify it installed correctly (open a **new** terminal window first, so it picks up the updated `PATH`):
+```powershell
+trivy --version
+```
+
+### 5. IaC — install Checkov
+
+```powershell
+pip install checkov
+```
+
+Checkov is pure Python, so this installs cleanly with no extra steps and no Smart App Control issues.
+
+### 6. Secrets — no install needed
+
+The secret-detection module (`backend/secret_detection/`) is custom-built with no external CLI tool and no extra dependencies beyond what's already installed in step 2.
+
+### 7. Run the backend
+
+```powershell
+uvicorn main:app --reload
+```
+
+Backend runs at `http://127.0.0.1:8000`. Swagger UI (interactive API docs, useful for testing each endpoint manually) is at `http://127.0.0.1:8000/docs`.
+
+### Frontend
+
+```bash
+cd secureflow
+npm install
+npm run dev
+```
+
+Frontend runs at `http://localhost:3000`.
+
+### Linux / WSL2 equivalent
+
+If developing inside WSL2 (recommended — see "Known environment notes" below), the same steps look like this instead:
+
+```bash
+cd backend
+python3 -m venv venv
+source venv/bin/activate
+
+pip install fastapi uvicorn python-multipart sqlalchemy gitpython semgrep checkov
+
+# Trivy — standalone binary, Linux install script
+curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+
+# Verify
+semgrep --version
+trivy --version
+checkov --version
+
+uvicorn main:app --reload
+```
+
+WSL2 automatically forwards `localhost` ports to Windows, so the frontend (run normally on Windows) and Swagger UI in your Windows browser work exactly as described above with no extra configuration.
+
+## Known environment notes
+
+- **Windows Smart App Control** has been observed blocking Semgrep's bundled executable (`WinError 4551`). If scans fail with no output and this error, either disable Smart App Control (Settings → Privacy & security → Windows Security → App & browser control), or develop inside **WSL2**, where this restriction doesn't apply.
+- All cloned repos and extracted uploads are written to `backend/tmp_scans/`, anchored to the backend's own drive — this avoids a cross-drive `os.path.relpath()` failure in Checkov that occurs when system temp folders default to a different drive than the project.
+- `backend/tmp_scans/` should be excluded from version control (`.gitignore`) — it's scratch space, regenerated on every scan.
+
+## Roadmap
+
+- **CI/CD integration**: a `/api/*/scan-ci` style ingestion endpoint so scans run automatically in a company's own GitHub Actions pipeline rather than requiring a manual paste-and-click in the dashboard. Requires:
+  - API key issuance per company/account
+  - Persistent storage (scans + findings tied to a repo/branch/commit over time) — currently every scan is stateless and in-memory only
+- Container image scanning (Trivy supports this already; not yet wired into a route)
+- DAST module
+- Wiring the remaining dashboard pages (Compliance, Projects, Reports) to real data once persistence exists
