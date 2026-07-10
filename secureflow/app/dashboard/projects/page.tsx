@@ -1,24 +1,98 @@
 'use client'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 
-const projects = [
-  { id: 1, name: 'api-gateway',      lang: 'Node.js',    files: 142, branch: 'main',    lastScan: '2h ago',   score: 38, critical: 8,  high: 14, medium: 22, status: 'failing' },
-  { id: 2, name: 'auth-service',     lang: 'Python',     files: 87,  branch: 'main',    lastScan: '4h ago',   score: 55, critical: 0,  high: 9,  medium: 14, status: 'warning' },
-  { id: 3, name: 'payment-ms',       lang: 'Java',       files: 214, branch: 'develop', lastScan: '3d ago',   score: 61, critical: 0,  high: 6,  medium: 11, status: 'warning' },
-  { id: 4, name: 'frontend-app',     lang: 'React / TS', files: 312, branch: 'main',    lastScan: '1d ago',   score: 78, critical: 0,  high: 2,  medium: 8,  status: 'passing' },
-  { id: 5, name: 'infra-terraform',  lang: 'Terraform',  files: 44,  branch: 'main',    lastScan: '5h ago',   score: 65, critical: 0,  high: 4,  medium: 17, status: 'warning' },
-  { id: 6, name: 'notification-svc', lang: 'Go',         files: 63,  branch: 'main',    lastScan: '2d ago',   score: 91, critical: 0,  high: 0,  medium: 3,  status: 'passing' },
-  { id: 7, name: 'data-pipeline',    lang: 'Python',     files: 98,  branch: 'staging', lastScan: '6d ago',   score: 44, critical: 3,  high: 8,  medium: 12, status: 'failing' },
-  { id: 8, name: 'mobile-backend',   lang: 'Node.js',    files: 176, branch: 'main',    lastScan: '1d ago',   score: 72, critical: 0,  high: 3,  medium: 9,  status: 'passing' },
-]
+const BACKEND_URL = 'http://127.0.0.1:8000'
 
-const statusConfig = {
+// ── Shape returned by GET /api/projects ──
+type BackendProject = {
+  id: number
+  name: string
+  source_type: string
+  repo_url: string | null
+  created_at: string
+  scan_count: number
+  last_scan_at: string | null
+  open_findings_count: number
+  critical_count: number
+  high_count: number
+  medium_count: number
+  low_count: number
+}
+
+type Status = 'failing' | 'warning' | 'passing'
+
+const statusConfig: Record<Status, { color: string; bg: string; label: string }> = {
   failing: { color: '#FF6B6B', bg: 'rgba(192,55,42,0.12)', label: 'Failing' },
   warning: { color: '#FFB020', bg: 'rgba(184,106,0,0.12)', label: 'Warning' },
   passing: { color: '#00E576', bg: 'rgba(0,229,118,0.10)', label: 'Passing' },
 }
 
+// ── A project "fails" if it has any Critical, "warns" if any High, else passes ──
+function deriveStatus(p: BackendProject): Status {
+  if ((p.critical_count ?? 0) > 0) return 'failing'
+  if ((p.high_count ?? 0) > 0) return 'warning'
+  return 'passing'
+}
+
+// ── Simple weighted score until the backend computes one server-side ──
+function deriveScore(p: BackendProject): number {
+  const critical = p.critical_count ?? 0
+  const high = p.high_count ?? 0
+  const medium = p.medium_count ?? 0
+  const score = 100 - critical * 15 - high * 5 - medium * 1
+  return Math.max(0, Math.min(100, Math.round(score)))
+}
+
+function relativeTime(iso: string | null): string {
+  if (!iso) return 'never'
+  const diffMs = Date.now() - new Date(iso).getTime()
+  const mins = Math.round(diffMs / 60000)
+  if (mins < 1) return 'just now'
+  if (mins < 60) return `${mins}m ago`
+  const hours = Math.round(mins / 60)
+  if (hours < 24) return `${hours}h ago`
+  const days = Math.round(hours / 24)
+  return `${days}d ago`
+}
+
 export default function ProjectsPage() {
+  const [projects, setProjects] = useState<BackendProject[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [search, setSearch] = useState('')
+
+  useEffect(() => {
+    let cancelled = false
+    async function load() {
+      setLoading(true)
+      setError(null)
+      try {
+        const res = await fetch(`${BACKEND_URL}/api/projects`)
+        if (!res.ok) throw new Error(`Backend error ${res.status}`)
+        const data = await res.json()
+        if (!cancelled) setProjects(data.projects || [])
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load projects')
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+    load()
+    return () => { cancelled = true }
+  }, [])
+
+  const filtered = projects.filter(p =>
+    p.name.toLowerCase().includes(search.toLowerCase())
+  )
+
+  const counts = {
+    total: projects.length,
+    failing: projects.filter(p => deriveStatus(p) === 'failing').length,
+    warning: projects.filter(p => deriveStatus(p) === 'warning').length,
+    passing: projects.filter(p => deriveStatus(p) === 'passing').length,
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
 
@@ -28,11 +102,13 @@ export default function ProjectsPage() {
         <div style={{ display: 'flex', gap: 10 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 7, background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 7, padding: '5px 12px', width: 200 }}>
             <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.3)' }}>⌕</span>
-            <input placeholder="Search projects…" style={{ background: 'none', border: 'none', outline: 'none', fontSize: 12, color: '#F0F4FF', width: '100%', fontFamily: 'var(--body)' }} />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search projects…"
+              style={{ background: 'none', border: 'none', outline: 'none', fontSize: 12, color: '#F0F4FF', width: '100%', fontFamily: 'var(--body)' }}
+            />
           </div>
-          <button style={{ fontFamily: 'var(--font)', fontSize: 12, fontWeight: 600, padding: '7px 14px', borderRadius: 7, background: '#1B7FFF', color: '#fff', border: 'none', cursor: 'pointer', boxShadow: '0 0 16px rgba(27,127,255,0.3)' }}>
-            + Connect Repo
-          </button>
         </div>
       </div>
 
@@ -42,10 +118,10 @@ export default function ProjectsPage() {
         {/* Summary row */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12, marginBottom: 20 }}>
           {[
-            { label: 'Total Projects', value: '14', color: '#1B7FFF' },
-            { label: 'Failing',        value: '3',  color: '#FF3B5C' },
-            { label: 'Warning',        value: '4',  color: '#FFB020' },
-            { label: 'Passing',        value: '7',  color: '#00E576' },
+            { label: 'Total Projects', value: String(counts.total),   color: '#1B7FFF' },
+            { label: 'Failing',        value: String(counts.failing), color: '#FF3B5C' },
+            { label: 'Warning',        value: String(counts.warning), color: '#FFB020' },
+            { label: 'Passing',        value: String(counts.passing), color: '#00E576' },
           ].map((s) => (
             <div key={s.label} style={{ background: 'rgba(13,27,46,0.8)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 12, padding: '14px 16px' }}>
               <div style={{ fontSize: 10, fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.6px', color: 'rgba(255,255,255,0.35)', marginBottom: 6 }}>{s.label}</div>
@@ -55,25 +131,43 @@ export default function ProjectsPage() {
           ))}
         </div>
 
+        {error && (
+          <div style={{ padding: '12px 16px', borderRadius: 8, background: 'rgba(192,55,42,0.12)', color: '#FF6B6B', fontSize: 12, marginBottom: 16 }}>
+            {error} — is the backend running at {BACKEND_URL}?
+          </div>
+        )}
+
         {/* Projects table */}
         <div style={{ background: 'rgba(13,27,46,0.8)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 12, overflow: 'hidden' }}>
           {/* Table header */}
-          <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 80px 80px 80px 90px 90px', gap: 0, padding: '10px 16px', borderBottom: '1px solid rgba(255,255,255,0.06)', background: 'rgba(255,255,255,0.02)' }}>
-            {['Project', 'Language', 'Branch', 'Critical', 'High', 'Medium', 'Score', 'Status'].map((h) => (
+          <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 80px 80px 80px 90px 90px', gap: 0, padding: '10px 16px', borderBottom: '1px solid rgba(255,255,255,0.06)', background: 'rgba(255,255,255,0.02)' }}>
+            {['Project', 'Source', 'Critical', 'High', 'Medium', 'Score', 'Status'].map((h) => (
               <div key={h} style={{ fontSize: 10, fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.5px', color: 'rgba(255,255,255,0.3)' }}>{h}</div>
             ))}
           </div>
 
+          {loading && (
+            <div style={{ padding: 24, fontSize: 12, color: 'rgba(255,255,255,0.4)' }}>Loading projects…</div>
+          )}
+
+          {!loading && filtered.length === 0 && !error && (
+            <div style={{ padding: 24, fontSize: 12, color: 'rgba(255,255,255,0.4)' }}>
+              No projects yet — run a scan from SAST, SCA, IaC, or Secrets to create one.
+            </div>
+          )}
+
           {/* Table rows */}
-          {projects.map((p, i) => {
-            const sc = statusConfig[p.status as keyof typeof statusConfig]
+          {!loading && filtered.map((p, i) => {
+            const status = deriveStatus(p)
+            const sc = statusConfig[status]
+            const score = deriveScore(p)
             return (
               <Link
                 key={p.id}
                 href={`/dashboard/projects/${p.id}`}
                 style={{
-                  display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 80px 80px 80px 90px 90px',
-                  padding: '12px 16px', borderBottom: i < projects.length - 1 ? '1px solid rgba(255,255,255,0.05)' : 'none',
+                  display: 'grid', gridTemplateColumns: '2fr 1fr 80px 80px 80px 90px 90px',
+                  padding: '12px 16px', borderBottom: i < filtered.length - 1 ? '1px solid rgba(255,255,255,0.05)' : 'none',
                   textDecoration: 'none', transition: 'background .12s', alignItems: 'center',
                 }}
                 onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.03)')}
@@ -82,24 +176,26 @@ export default function ProjectsPage() {
                 {/* Name */}
                 <div>
                   <div style={{ fontSize: 13, fontWeight: 500, color: '#F0F4FF' }}>{p.name}</div>
-                  <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.3)', marginTop: 2 }}>{p.files} files · last scan {p.lastScan}</div>
+                  <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.3)', marginTop: 2 }}>
+                    {p.scan_count} scan{p.scan_count === 1 ? '' : 's'} · last scan {relativeTime(p.last_scan_at)}
+                  </div>
                 </div>
-                {/* Lang */}
-                <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.5)' }}>{p.lang}</div>
-                {/* Branch */}
-                <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', fontFamily: 'var(--mono)' }}>{p.branch}</div>
+                {/* Source */}
+                <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', fontFamily: 'var(--mono)' }}>
+                  {p.source_type === 'git' ? 'GitHub' : 'Upload'}
+                </div>
                 {/* Critical */}
-                <div style={{ fontSize: 13, fontWeight: 500, color: p.critical > 0 ? '#FF6B6B' : 'rgba(255,255,255,0.25)' }}>{p.critical}</div>
+                <div style={{ fontSize: 13, fontWeight: 500, color: (p.critical_count ?? 0) > 0 ? '#FF6B6B' : 'rgba(255,255,255,0.25)' }}>{p.critical_count ?? 0}</div>
                 {/* High */}
-                <div style={{ fontSize: 13, fontWeight: 500, color: p.high > 0 ? '#FFB020' : 'rgba(255,255,255,0.25)' }}>{p.high}</div>
+                <div style={{ fontSize: 13, fontWeight: 500, color: (p.high_count ?? 0) > 0 ? '#FFB020' : 'rgba(255,255,255,0.25)' }}>{p.high_count ?? 0}</div>
                 {/* Medium */}
-                <div style={{ fontSize: 13, fontWeight: 500, color: p.medium > 0 ? '#4D9FFF' : 'rgba(255,255,255,0.25)' }}>{p.medium}</div>
+                <div style={{ fontSize: 13, fontWeight: 500, color: (p.medium_count ?? 0) > 0 ? '#4D9FFF' : 'rgba(255,255,255,0.25)' }}>{p.medium_count ?? 0}</div>
                 {/* Score */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <div style={{ flex: 1, height: 4, background: 'rgba(255,255,255,0.07)', borderRadius: 2, overflow: 'hidden' }}>
-                    <div style={{ height: '100%', width: `${p.score}%`, background: p.score >= 80 ? '#00E576' : p.score >= 60 ? '#FFB020' : '#FF3B5C', borderRadius: 2 }} />
+                    <div style={{ height: '100%', width: `${score}%`, background: score >= 80 ? '#00E576' : score >= 60 ? '#FFB020' : '#FF3B5C', borderRadius: 2 }} />
                   </div>
-                  <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', minWidth: 24 }}>{p.score}</span>
+                  <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', minWidth: 24 }}>{score}</span>
                 </div>
                 {/* Status */}
                 <div>

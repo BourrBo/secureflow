@@ -6,7 +6,7 @@ import { ISO27001Badge, ViewStandardLink, ExportReportButton } from '@/component
 // ── Types matching your backend response ──
 type BackendFinding = {
   title:       string
-  severity:    string       // "WARNING", "ERROR", "INFO"
+  severity:    string       // now "CRITICAL" | "HIGH" | "MEDIUM" | "LOW" (normalized backend-side)
   file:        string
   line:        number
   description: string
@@ -30,11 +30,19 @@ type Finding = {
 }
 
 // ── Map backend severity → SecureFlow severity ──
+// Backend now normalizes severity to CRITICAL/HIGH/MEDIUM/LOW before sending
+// (see utils/severity.py). The ERROR/WARNING/INFO fallback below only kicks
+// in if an older backend build is ever running.
 function mapSeverity(raw: string): Finding['severity'] {
   const s = raw?.toUpperCase()
-  if (s === 'ERROR')   return 'critical'
-  if (s === 'WARNING') return 'high'
-  if (s === 'INFO')    return 'medium'
+  if (s === 'CRITICAL') return 'critical'
+  if (s === 'HIGH')     return 'high'
+  if (s === 'MEDIUM')   return 'medium'
+  if (s === 'LOW')      return 'low'
+  // Legacy fallback (pre-normalization backend)
+  if (s === 'ERROR')    return 'critical'
+  if (s === 'WARNING')  return 'high'
+  if (s === 'INFO')     return 'medium'
   return 'low'
 }
 
