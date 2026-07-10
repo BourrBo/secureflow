@@ -17,10 +17,10 @@ Built as a B.Tech major internship project at Laati Consulting, led by a
 |---|---|---|
 | 1 | Persistence layer (SQLite: projects/scans/findings) | ✅ Done |
 | 2 | Findings, Projects, Reports, Compliance views | ✅ Backend + frontend done |
-| 3 | Container image scanning (Trivy `image` mode) | ⏳ Not started |
+| 3 | DAST (OWASP ZAP) | ⏳ working on it  | 
 | 4 | CI/CD decision layer (Jenkins/GitLab integration) | ⏳ working on it  |
 | 5 | Settings / API keys | ⏳ Not started |
-| 6 | DAST (OWASP ZAP) | ⏳ working on it  |
+| 6 | Container image scanning (Trivy `image` mode) | ⏳ Not started |
 
 ### Known gaps to fix before Phase 3
 - `findings/[id]` detail page still reads from `localStorage` (SAST-only,
