@@ -1,392 +1,222 @@
 'use client'
-import { useState, useEffect } from 'react'
-import { useParams } from 'next/navigation'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
+import StatCard from '@/components/dashboard/StatCard'
+import SeverityBadge from '@/components/dashboard/SeverityBadge'
 
-// ── Shape coming from the SAST page (sessionStorage) ──
-type RealFinding = {
+const BACKEND_URL = 'http://127.0.0.1:8000'
+
+type Finding = {
   id: number
-  title: string 
-  severity: 'critical' | 'high' | 'medium' | 'low'
-  file: string
-  line: number
-  description: string
-  rule: string
-  cwe: string
-  owasp: string
-  status: string
+  scan_id: number
+  project_id: number
+  project_name: string
+  scan_type: string
+  title: string
+  severity: string
+  file: string | null
+  line: number | null
+  description: string | null
+  rule: string | null
+  cwe: string | null
+  owasp: string | null
+  scanner: string
+  iso27001_control: string | null
+  iso27001_control_name: string | null
+  code_context: { ln: number; code: string; highlight?: boolean }[]
 }
 
-type AdaptedFinding = {
-  id: number; name: string; owasp: string; severity: string
-  file: string; line: number; cwe: string; cvss: number; epss: number
-  scanner: string; branch: string; commit: string; status: string; assignee: string
-  description: string; codeLines: { ln: number; code: string; highlight?: boolean }[]
-  fixCode: string; tags: string[]; jira: string
-  activity: { time: string; msg: string }[]
+type Project = { id: number; name: string }
+
+const scannerLabels: Record<string, string> = {
+  semgrep: 'SAST · Semgrep',
+  trivy: 'SCA · Trivy',
+  checkov: 'IaC · Checkov',
+  secrets: 'Secrets',
 }
 
-const findingData: Record<string, AdaptedFinding> = {
-  '1': {
-    id: 1, name: 'SQL Injection via user input', owasp: 'A03:2021 · Injection',
-    severity: 'critical', file: 'routes/user.js', line: 142,
-    cwe: 'CWE-89', cvss: 9.1, epss: 0.82,
-    scanner: 'Semgrep 1.47', branch: 'main', commit: 'a3f1c92',
-    status: 'open', assignee: 'Rahul Kumar',
-    description: 'User-controlled input from req.params.id is concatenated directly into a raw SQL query string without sanitization or parameterization. This allows an attacker to inject arbitrary SQL, potentially reading, modifying, or deleting all database records.',
-    codeLines: [
-      { ln: 139, code: "const db = require('./db');" },
-      { ln: 140, code: 'const userId = req.params.id;' },
-      { ln: 141, code: 'const query = `SELECT * FROM users`;' },
-      { ln: 142, code: 'db.execute(query + " WHERE id=" + userId);', highlight: true },
-      { ln: 143, code: 'return res.json(result);' },
-    ],
-    fixCode: 'db.execute("SELECT * FROM users WHERE id=?", [userId]);',
-    tags: ['sql-injection', 'owasp-top10', 'CWE-89', 'database', 'api-layer'],
-    jira: 'APPSEC-88',
-    activity: [
-      { time: 'Jan 18, 09:14', msg: 'Finding detected by Semgrep on PR #221' },
-      { time: 'Jan 18, 11:30', msg: 'Assigned to Rahul Kumar by auto-policy' },
-      { time: 'Jan 18, 14:02', msg: 'Jira ticket APPSEC-88 created automatically' },
-      { time: 'Jan 19, 08:55', msg: 'Slack notification sent to #security-alerts' },
-    ],
-  },
+function toSeverityKey(s: string): 'critical' | 'high' | 'medium' | 'low' {
+  const v = s?.toUpperCase()
+  if (v === 'CRITICAL') return 'critical'
+  if (v === 'HIGH') return 'high'
+  if (v === 'MEDIUM') return 'medium'
+  return 'low'
 }
 
-// ── Convert a real scan finding into the shape this page renders ──
-function adaptRealFinding(real: RealFinding): AdaptedFinding {
-  return {
-    id: real.id,
-    name: real.title,
-    owasp: `${real.owasp} · ${real.rule}`,
-    severity: real.severity,
-    file: real.file,
-    line: real.line,
-    cwe: real.cwe,
-    cvss: 0, // not provided by Semgrep — rendered as N/A, never faked
-    epss: 0, // same
-    scanner: 'Semgrep',
-    branch: '—',
-    commit: '—',
-    status: real.status || 'open',
-    assignee: 'Unassigned',
-    description: real.description,
-    codeLines: [
-      { ln: real.line, code: `// See ${real.file}:${real.line} in your codebase`, highlight: true },
-    ],
-    fixCode: '// Run "Generate Fix" for an AI-suggested remediation',
-    tags: [real.rule, real.cwe, real.severity],
-    jira: '—',
-    activity: [
-      { time: 'Just now', msg: `Finding detected by Semgrep — ${real.rule}` },
-    ],
-  }
-}
+export default function FindingsPage() {
+  const [findings, setFindings] = useState<Finding[]>([])
+  const [projects, setProjects] = useState<Project[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
-const sevConfig: Record<string, { color: string; bg: string; border: string }> = {
-  critical: { color: '#FF6B6B', bg: 'rgba(192,55,42,0.15)', border: 'rgba(192,55,42,0.3)' },
-  high:     { color: '#FFB020', bg: 'rgba(184,106,0,0.15)', border: 'rgba(184,106,0,0.3)' },
-  medium:   { color: '#4D9FFF', bg: 'rgba(27,127,255,0.15)', border: 'rgba(27,127,255,0.3)' },
-}
+  const [projectFilter, setProjectFilter] = useState<string>('all')
+  const [severityFilter, setSeverityFilter] = useState<string>('all')
+  const [scannerFilter, setScannerFilter] = useState<string>('all')
+  const [expanded, setExpanded] = useState<number | null>(null)
 
-export default function FindingDetailPage() {
-  const params = useParams()
-  const id = params?.id?.toString() || ''
-  const [finding, setFinding] = useState<AdaptedFinding | null>(null)
-  const [aiLoading, setAiLoading] = useState(false)
-  const [aiShown, setAiShown] = useState(false)
-  const [status, setStatus] = useState('open')
-  const [copied, setCopied] = useState(false)
-
-  // ── Load real finding from sessionStorage, fall back to mock ──
+  // Load project list once, for the filter dropdown
   useEffect(() => {
-    // const stored = sessionStorage.getItem('secureflow_findings')
-    const stored = localStorage.getItem('secureflow_findings')
-    if (stored) {
+    fetch(`${BACKEND_URL}/api/projects`)
+      .then(r => r.json())
+      .then(d => setProjects(d.projects || []))
+      .catch(() => {})
+  }, [])
+
+  // Reload findings whenever a filter changes
+  useEffect(() => {
+    let cancelled = false
+    async function load() {
+      setLoading(true)
+      setError(null)
       try {
-        const parsed: RealFinding[] = JSON.parse(stored)
-        const match = parsed.find(f => f.id.toString() === id)
-        if (match) {
-          const adapted = adaptRealFinding(match)
-          setFinding(adapted)
-          setStatus(adapted.status)
-          return
-        }
-      } catch {
-        // malformed sessionStorage data — fall through to mock below
+        const params = new URLSearchParams()
+        if (projectFilter !== 'all') params.set('project_id', projectFilter)
+        if (severityFilter !== 'all') params.set('severity', severityFilter)
+        if (scannerFilter !== 'all') params.set('scanner', scannerFilter)
+
+        const res = await fetch(`${BACKEND_URL}/api/findings?${params.toString()}`)
+        if (!res.ok) throw new Error(`Backend error ${res.status}`)
+        const data = await res.json()
+        if (!cancelled) setFindings(data.findings || [])
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load findings')
+      } finally {
+        if (!cancelled) setLoading(false)
       }
     }
-    const fallback = findingData[id] || null
-    setFinding(fallback)
-    setStatus(fallback?.status ?? 'open')
-  }, [id])
+    load()
+    return () => { cancelled = true }
+  }, [projectFilter, severityFilter, scannerFilter])
 
-  if (!finding) {
-    return (
-      <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', fontFamily: 'var(--body)' }}>
-        <div style={{ height: 56, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 20px', borderBottom: '1px solid rgba(255,255,255,0.06)', background: 'var(--bg)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'rgba(255,255,255,0.35)' }}>
-            <Link href="/dashboard" style={{ color: 'rgba(255,255,255,0.35)', textDecoration: 'none' }}>Dashboard</Link>
-            <span>/</span>
-            <Link href="/dashboard/sast" style={{ color: 'rgba(255,255,255,0.35)', textDecoration: 'none' }}>SAST</Link>
-            <span>/</span>
-            <span style={{ color: '#F0F4FF', fontWeight: 500 }}>Finding not found</span>
-          </div>
-          <Link href="/dashboard/sast" style={{ padding: '7px 12px', borderRadius: 7, border: '1px solid rgba(255,255,255,0.1)', background: 'transparent', color: 'rgba(255,255,255,0.5)', fontSize: 12, textDecoration: 'none' }}>
-            ← Back
-          </Link>
-        </div>
-        <div style={{ flex: 1, overflowY: 'auto', padding: 20, background: 'rgba(6,13,24,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ textAlign: 'center', color: 'rgba(255,255,255,0.6)' }}>
-            <div style={{ fontSize: 48, marginBottom: 16 }}>⚠</div>
-            <div style={{ fontSize: 18, fontWeight: 600, color: '#F0F4FF', marginBottom: 8 }}>Finding not found</div>
-            <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.35)', maxWidth: 420, margin: '0 auto' }}>
-              The requested finding ID does not exist in session data or mock fixtures. Return to the SAST results list and select a valid finding.
-            </div>
-          </div>
-        </div>
-      </div>
-    )
+  const counts = {
+    total: findings.length,
+    critical: findings.filter(f => toSeverityKey(f.severity) === 'critical').length,
+    high: findings.filter(f => toSeverityKey(f.severity) === 'high').length,
+    medium: findings.filter(f => toSeverityKey(f.severity) === 'medium').length,
   }
 
-  const sev = sevConfig[finding.severity] || sevConfig.critical
-
-  const handleAiFix = () => {
-    setAiLoading(true)
-    setTimeout(() => { setAiLoading(false); setAiShown(true) }, 2000)
-  }
-
-  const handleCopy = () => {
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
+  const selectStyle: React.CSSProperties = {
+    padding: '6px 10px', borderRadius: 7, border: '1px solid rgba(255,255,255,0.1)',
+    background: 'rgba(255,255,255,0.05)', color: '#F0F4FF', fontSize: 12,
+    outline: 'none', cursor: 'pointer', fontFamily: 'var(--body)',
   }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', fontFamily: 'var(--body)' }}>
 
-      {/* ── TOP BAR ── */}
+      {/* TOP BAR */}
       <div style={{ height: 56, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 20px', borderBottom: '1px solid rgba(255,255,255,0.06)', background: 'var(--bg)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'rgba(255,255,255,0.35)' }}>
           <Link href="/dashboard" style={{ color: 'rgba(255,255,255,0.35)', textDecoration: 'none' }}>Dashboard</Link>
           <span>/</span>
-          <Link href="/dashboard/sast" style={{ color: 'rgba(255,255,255,0.35)', textDecoration: 'none' }}>SAST</Link>
-          <span>/</span>
-          <span style={{ color: '#F0F4FF', fontWeight: 500 }}>SF-{finding.id.toString().padStart(4, '0')} · {finding.name.slice(0, 30)}…</span>
+          <span style={{ color: '#F0F4FF', fontWeight: 500 }}>Findings</span>
         </div>
-        <div style={{ display: 'flex', gap: 10 }}>
-          <Link href="/dashboard/sast" style={{ padding: '7px 12px', borderRadius: 7, border: '1px solid rgba(255,255,255,0.1)', background: 'transparent', color: 'rgba(255,255,255,0.5)', fontSize: 12, textDecoration: 'none' }}>
-            ← Back
-          </Link>
-          <button style={{ padding: '7px 14px', borderRadius: 7, border: 'none', background: '#1B7FFF', color: '#fff', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'var(--font)' }}>
-            Create Jira Ticket
-          </button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <select value={projectFilter} onChange={e => setProjectFilter(e.target.value)} style={selectStyle}>
+            <option value="all" style={{ background: '#0D1B2E' }}>All projects</option>
+            {projects.map(p => (
+              <option key={p.id} value={p.id} style={{ background: '#0D1B2E' }}>{p.name}</option>
+            ))}
+          </select>
+          <select value={severityFilter} onChange={e => setSeverityFilter(e.target.value)} style={selectStyle}>
+            <option value="all" style={{ background: '#0D1B2E' }}>All severities</option>
+            {['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'].map(s => (
+              <option key={s} value={s} style={{ background: '#0D1B2E' }}>{s}</option>
+            ))}
+          </select>
+          <select value={scannerFilter} onChange={e => setScannerFilter(e.target.value)} style={selectStyle}>
+            <option value="all" style={{ background: '#0D1B2E' }}>All scanners</option>
+            {Object.entries(scannerLabels).map(([k, label]) => (
+              <option key={k} value={k} style={{ background: '#0D1B2E' }}>{label}</option>
+            ))}
+          </select>
         </div>
       </div>
 
-      {/* ── CONTENT ── */}
+      {/* CONTENT */}
       <div style={{ flex: 1, overflowY: 'auto', padding: 20, background: 'rgba(6,13,24,0.8)' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 300px', gap: 16, alignItems: 'start' }}>
 
-          {/* ── LEFT COLUMN ── */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        {/* Summary */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12, marginBottom: 20 }}>
+          <StatCard label="Total findings" value={counts.total} accentColor="#1B7FFF" />
+          <StatCard label="Critical" value={counts.critical} accentColor="#FF6B6B" />
+          <StatCard label="High" value={counts.high} accentColor="#FFB020" />
+          <StatCard label="Medium" value={counts.medium} accentColor="#4D9FFF" />
+        </div>
 
-            {/* Finding header */}
-            <div style={{ background: 'rgba(13,27,46,0.8)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 12, padding: 20 }}>
-              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 12 }}>
-                <span style={{ fontSize: 10, fontWeight: 500, padding: '3px 10px', borderRadius: 10, background: sev.bg, color: sev.color, border: `1px solid ${sev.border}`, whiteSpace: 'nowrap', marginTop: 3 }}>
-                  {finding.severity.toUpperCase()}
-                </span>
-                <div>
-                  <h1 style={{ fontFamily: 'var(--font)', fontSize: 18, fontWeight: 700, color: '#F0F4FF', letterSpacing: '-0.3px', marginBottom: 4 }}>
-                    {finding.name}
-                  </h1>
-                  <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.35)', fontFamily: 'var(--mono)' }}>
-                    SF-{finding.id.toString().padStart(4,'0')} · {finding.cwe} · {finding.owasp} · {finding.file}:{finding.line}
-                  </div>
-                </div>
-              </div>
-              <p style={{ fontSize: 13, color: 'rgba(255,255,255,0.6)', lineHeight: 1.7, marginBottom: 0 }}>
-                {finding.description}
-              </p>
+        {error && (
+          <div style={{ padding: '12px 16px', borderRadius: 8, background: 'rgba(192,55,42,0.12)', color: '#FF6B6B', fontSize: 12, marginBottom: 16 }}>
+            {error} — is the backend running at {BACKEND_URL}?
+          </div>
+        )}
+
+        {/* Findings table */}
+        <div style={{ background: 'rgba(13,27,46,0.8)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 12, overflow: 'hidden' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 90px 100px', padding: '10px 16px', borderBottom: '1px solid rgba(255,255,255,0.06)', background: 'rgba(255,255,255,0.02)' }}>
+            {['Finding', 'Project', 'Scanner', 'Severity', 'ISO Control'].map(h => (
+              <div key={h} style={{ fontSize: 10, fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.5px', color: 'rgba(255,255,255,0.3)' }}>{h}</div>
+            ))}
+          </div>
+
+          {loading && (
+            <div style={{ padding: 24, fontSize: 12, color: 'rgba(255,255,255,0.4)' }}>Loading findings…</div>
+          )}
+
+          {!loading && findings.length === 0 && !error && (
+            <div style={{ padding: 24, fontSize: 12, color: 'rgba(255,255,255,0.4)' }}>
+              No findings match these filters.
             </div>
+          )}
 
-            {/* Vulnerable code */}
-            <div style={{ background: 'rgba(13,27,46,0.8)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 12, overflow: 'hidden' }}>
-              <div style={{ padding: '12px 16px', borderBottom: '1px solid rgba(255,255,255,0.06)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <span style={{ fontSize: 12, fontWeight: 600, color: '#F0F4FF', fontFamily: 'var(--font)' }}>Vulnerable code</span>
-                <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)', fontFamily: 'var(--mono)' }}>{finding.file}</span>
-              </div>
-              <div style={{ background: '#040D1A', padding: '14px 16px', fontFamily: 'var(--mono)', fontSize: 12, lineHeight: 1.8 }}>
-                {finding.codeLines.map((line) => (
-                  <div
-                    key={line.ln}
-                    style={{
-                      display: 'flex', gap: 16, alignItems: 'baseline',
-                      background: line.highlight ? 'rgba(192,55,42,0.18)' : 'transparent',
-                      margin: line.highlight ? '0 -16px' : '0',
-                      padding: line.highlight ? '0 16px' : '0',
-                      borderLeft: line.highlight ? '3px solid #FF3B5C' : '3px solid transparent',
-                    }}
-                  >
-                    <span style={{ color: 'rgba(255,255,255,0.2)', minWidth: 28, textAlign: 'right', userSelect: 'none', fontSize: 11 }}>{line.ln}</span>
-                    <span style={{ color: line.highlight ? '#F09595' : 'rgba(255,255,255,0.65)' }}>{line.code}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* AI Fix section */}
-            <div style={{ background: 'rgba(13,27,46,0.8)', border: `1px solid ${aiShown ? 'rgba(0,229,118,0.2)' : 'rgba(255,255,255,0.07)'}`, borderRadius: 12, overflow: 'hidden', transition: 'border-color .3s' }}>
-              <div style={{ padding: '12px 16px', borderBottom: '1px solid rgba(255,255,255,0.06)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span style={{ fontSize: 14 }}>✦</span>
-                  <span style={{ fontSize: 12, fontWeight: 600, color: '#F0F4FF', fontFamily: 'var(--font)' }}>AI Fix Suggestion</span>
-                  {aiShown && <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 4, background: 'rgba(0,229,118,0.1)', color: '#00E576', border: '1px solid rgba(0,229,118,0.2)' }}>Ready</span>}
-                </div>
-                {!aiShown && (
-                  <button
-                    onClick={handleAiFix}
-                    disabled={aiLoading}
-                    style={{ padding: '6px 14px', borderRadius: 7, border: 'none', background: aiLoading ? 'rgba(27,127,255,0.4)' : '#1B7FFF', color: '#fff', fontSize: 12, fontWeight: 600, cursor: aiLoading ? 'not-allowed' : 'pointer', fontFamily: 'var(--font)', display: 'flex', alignItems: 'center', gap: 6 }}
-                  >
-                    {aiLoading ? (
-                      <>
-                        <span style={{ display: 'inline-block', width: 12, height: 12, border: '2px solid rgba(255,255,255,0.3)', borderTopColor: '#fff', borderRadius: '50%', animation: 'spin 0.7s linear infinite' }} />
-                        Generating fix…
-                      </>
-                    ) : '✦ Generate Fix'}
-                  </button>
-                )}
-                {aiShown && (
-                  <button onClick={handleCopy} style={{ padding: '5px 12px', borderRadius: 6, border: '1px solid rgba(0,229,118,0.2)', background: 'rgba(0,229,118,0.08)', color: '#00E576', fontSize: 11, cursor: 'pointer', fontFamily: 'var(--body)' }}>
-                    {copied ? '✓ Copied!' : 'Copy fix'}
-                  </button>
-                )}
-              </div>
-
-              {!aiShown && !aiLoading && (
-                <div style={{ padding: '20px 16px', textAlign: 'center', color: 'rgba(255,255,255,0.3)', fontSize: 13 }}>
-                  Click &ldquo;Generate Fix&rdquo; to get an AI-powered remediation for this vulnerability
-                </div>
-              )}
-
-              {aiLoading && (
-                <div style={{ padding: '20px 16px', display: 'flex', alignItems: 'center', gap: 12 }}>
-                  <span style={{ display: 'inline-block', width: 16, height: 16, border: '2px solid rgba(27,127,255,0.3)', borderTopColor: '#4D9FFF', borderRadius: '50%', animation: 'spin 0.7s linear infinite', flexShrink: 0 }} />
+          {!loading && findings.map((f, i) => {
+            const isOpen = expanded === f.id
+            return (
+              <div key={f.id} style={{ borderBottom: i < findings.length - 1 ? '1px solid rgba(255,255,255,0.05)' : 'none' }}>
+                <div
+                  onClick={() => setExpanded(isOpen ? null : f.id)}
+                  style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 90px 100px', padding: '12px 16px', alignItems: 'center', cursor: 'pointer', transition: 'background .12s' }}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.03)')}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                >
                   <div>
-                    <div style={{ fontSize: 12, color: '#4D9FFF', fontWeight: 500 }}>Analyzing vulnerability…</div>
-                    <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)', marginTop: 2 }}>Reading codebase context and generating fix</div>
-                  </div>
-                </div>
-              )}
-
-              {aiShown && (
-                <div style={{ padding: 16 }}>
-                  <p style={{ fontSize: 13, color: 'rgba(255,255,255,0.6)', lineHeight: 1.6, marginBottom: 12 }}>
-                    Replace string concatenation with a parameterized query. Pass user input as a bound parameter so the database driver handles escaping automatically:
-                  </p>
-                  <div style={{ background: '#040D1A', borderRadius: 8, padding: '12px 14px', fontFamily: 'var(--mono)', fontSize: 12, lineHeight: 1.8, border: '1px solid rgba(0,229,118,0.1)' }}>
-                    <div style={{ display: 'flex', gap: 12 }}>
-                      <span style={{ color: 'rgba(255,255,255,0.2)', minWidth: 28, textAlign: 'right' }}>{finding.line}</span>
-                      <span style={{ color: '#98C56A' }}>{finding.fixCode}</span>
+                    <div style={{ fontSize: 13, fontWeight: 500, color: '#F0F4FF' }}>{f.title}</div>
+                    <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.3)', marginTop: 2, fontFamily: 'var(--mono)' }}>
+                      {f.file || 'n/a'}{f.line ? `:${f.line}` : ''}
                     </div>
                   </div>
-                  <div style={{ marginTop: 10, fontSize: 11, color: 'rgba(255,255,255,0.3)', lineHeight: 1.6 }}>
-                    💡 This fix uses a prepared statement which prevents all SQL injection attacks by separating data from query logic.
+                  <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.5)' }}>{f.project_name}</div>
+                  <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.5)' }}>{scannerLabels[f.scanner] || f.scanner}</div>
+                  <div><SeverityBadge severity={toSeverityKey(f.severity)} /></div>
+                  <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', fontFamily: 'var(--mono)' }}>{f.iso27001_control || '—'}</div>
+                </div>
+
+                {isOpen && (
+                  <div style={{ padding: '4px 16px 16px 16px', background: 'rgba(255,255,255,0.015)' }}>
+                    <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.6)', marginBottom: 10, lineHeight: 1.5 }}>
+                      {f.description || 'No description available.'}
+                    </div>
+                    <div style={{ display: 'flex', gap: 16, fontSize: 11, color: 'rgba(255,255,255,0.4)', marginBottom: 10 }}>
+                      {f.cwe && <span>CWE: {f.cwe}</span>}
+                      {f.owasp && <span>OWASP: {f.owasp}</span>}
+                      {f.iso27001_control_name && <span>ISO {f.iso27001_control}: {f.iso27001_control_name}</span>}
+                    </div>
+                    {f.code_context && f.code_context.length > 0 && (
+                      <div style={{ background: '#0A121F', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 8, padding: '10px 0', fontFamily: 'var(--mono)', fontSize: 11 }}>
+                        {f.code_context.map(line => (
+                          <div key={line.ln} style={{ display: 'flex', gap: 12, padding: '2px 14px', background: line.highlight ? 'rgba(255,107,107,0.08)' : 'transparent' }}>
+                            <span style={{ color: 'rgba(255,255,255,0.25)', minWidth: 30, textAlign: 'right' }}>{line.ln}</span>
+                            <span style={{ color: line.highlight ? '#FF6B6B' : 'rgba(255,255,255,0.6)', whiteSpace: 'pre' }}>{line.code}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                </div>
-              )}
-            </div>
-
-            {/* Action buttons */}
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              {[
-                { label: '🎫 Create Jira Ticket', primary: true },
-                { label: '👤 Assign to Dev' },
-                { label: '✓ Mark Resolved' },
-                { label: '🚫 False Positive' },
-                { label: '⚠ Accept Risk' },
-              ].map((btn) => (
-                <button
-                  key={btn.label}
-                  onClick={() => btn.label.includes('Resolved') && setStatus('resolved')}
-                  style={{
-                    padding: '8px 14px', borderRadius: 8, fontSize: 12, fontWeight: 500,
-                    cursor: 'pointer', fontFamily: 'var(--body)', transition: 'all .15s',
-                    background: btn.primary ? '#1B7FFF' : 'rgba(255,255,255,0.05)',
-                    color: btn.primary ? '#fff' : 'rgba(255,255,255,0.6)',
-                    border: btn.primary ? 'none' : '1px solid rgba(255,255,255,0.1)',
-                    boxShadow: btn.primary ? '0 0 16px rgba(27,127,255,0.25)' : 'none',
-                  }}
-                >
-                  {btn.label}
-                </button>
-              ))}
-            </div>
-
-            {/* Activity log */}
-            <div style={{ background: 'rgba(13,27,46,0.8)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 12, padding: 16 }}>
-              <div style={{ fontSize: 12, fontWeight: 600, color: '#F0F4FF', fontFamily: 'var(--font)', marginBottom: 14 }}>Activity log</div>
-              {finding.activity.map((a, i) => (
-                <div key={i} style={{ display: 'flex', gap: 14, padding: '8px 0', borderBottom: i < finding.activity.length - 1 ? '1px solid rgba(255,255,255,0.04)' : 'none', alignItems: 'center' }}>
-                  <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.25)', fontFamily: 'var(--mono)', minWidth: 100, flexShrink: 0 }}>{a.time}</span>
-                  <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.55)' }}>{a.msg}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* ── RIGHT COLUMN — Metadata ── */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-
-            {/* Details */}
-            <div style={{ background: 'rgba(13,27,46,0.8)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 12, padding: 16 }}>
-              <div style={{ fontSize: 12, fontWeight: 600, color: '#F0F4FF', fontFamily: 'var(--font)', marginBottom: 14 }}>Finding details</div>
-              {[
-                { label: 'Status',   value: status === 'resolved' ? '✓ Resolved' : '● Open', color: status === 'resolved' ? '#00E576' : '#FF6B6B' },
-                { label: 'Assignee', value: finding.assignee },
-                { label: 'Scanner',  value: finding.scanner, mono: true },
-                { label: 'CVSS',     value: finding.cvss ? finding.cvss.toString() : 'N/A', color: '#FF6B6B' },
-                { label: 'EPSS',     value: finding.epss ? finding.epss.toString() : 'N/A', color: '#FFB020' },
-                { label: 'Branch',   value: finding.branch, mono: true },
-                { label: 'Commit',   value: finding.commit, mono: true, color: '#4D9FFF' },
-                { label: 'Jira',     value: finding.jira, color: '#4D9FFF' },
-              ].map((row) => (
-                <div key={row.label} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
-                  <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.35)' }}>{row.label}</span>
-                  <span style={{ fontSize: 12, fontWeight: 500, color: row.color || '#F0F4FF', fontFamily: row.mono ? 'var(--mono)' : 'var(--body)' }}>{row.value}</span>
-                </div>
-              ))}
-            </div>
-
-            {/* Tags */}
-            <div style={{ background: 'rgba(13,27,46,0.8)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 12, padding: 16 }}>
-              <div style={{ fontSize: 12, fontWeight: 600, color: '#F0F4FF', fontFamily: 'var(--font)', marginBottom: 10 }}>Tags</div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                {finding.tags.map((tag) => (
-                  <span key={tag} style={{ fontSize: 10, padding: '3px 8px', borderRadius: 6, background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.4)' }}>
-                    {tag}
-                  </span>
-                ))}
+                )}
               </div>
-            </div>
-
-            {/* OWASP reference */}
-            <div style={{ background: 'rgba(13,27,46,0.8)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 12, padding: 16 }}>
-              <div style={{ fontSize: 12, fontWeight: 600, color: '#F0F4FF', fontFamily: 'var(--font)', marginBottom: 10 }}>OWASP Reference</div>
-              <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.5)', lineHeight: 1.6 }}>
-                {finding.owasp} — Injection flaws occur when untrusted data is sent to an interpreter as part of a command or query.
-              </div>
-              <a href="https://owasp.org/Top10/A03_2021-Injection/" target="_blank" rel="noreferrer" style={{ display: 'inline-block', marginTop: 10, fontSize: 11, color: '#4D9FFF', textDecoration: 'none' }}>
-                View OWASP docs →
-              </a>
-            </div>
-          </div>
-
+            )
+          })}
         </div>
       </div>
-
-      <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
     </div>
   )
 }

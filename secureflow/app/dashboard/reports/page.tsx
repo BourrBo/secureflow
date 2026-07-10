@@ -1,203 +1,190 @@
 'use client'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
+import StatCard from '@/components/dashboard/StatCard'
 
-const reports = [
-  { id:1,  name:'Executive Security Summary — May 2025',  type:'PDF', size:'4.2 MB', date:'May 21, 2025', category:'Executive',  status:'ready' },
-  { id:2,  name:'OWASP Top 10 Coverage Report',           type:'PDF', size:'1.8 MB', date:'May 18, 2025', category:'Compliance', status:'ready' },
-  { id:3,  name:'SOC 2 Type II Evidence Pack',            type:'PDF', size:'8.1 MB', date:'May 15, 2025', category:'Compliance', status:'ready' },
-  { id:4,  name:'Full Vulnerability Export — All Modules',type:'CSV', size:'0.9 MB', date:'May 20, 2025', category:'Technical',  status:'ready' },
-  { id:5,  name:'ISO 27001 Gap Analysis',                 type:'PDF', size:'3.1 MB', date:'May 10, 2025', category:'Compliance', status:'ready' },
-  { id:6,  name:'SAST Findings — api-gateway',            type:'CSV', size:'0.3 MB', date:'May 21, 2025', category:'Technical',  status:'ready' },
-  { id:7,  name:'SCA SBOM — CycloneDX Format',            type:'JSON',size:'1.1 MB', date:'May 19, 2025', category:'SBOM',       status:'ready' },
-  { id:8,  name:'SCA SBOM — SPDX Format',                 type:'JSON',size:'0.8 MB', date:'May 19, 2025', category:'SBOM',       status:'ready' },
-  { id:9,  name:'Secrets Exposure Report',                type:'PDF', size:'0.6 MB', date:'May 17, 2025', category:'Technical',  status:'ready' },
-  { id:10, name:'Q1 2025 Security Metrics',               type:'PDF', size:'5.4 MB', date:'Apr 01, 2025', category:'Executive',  status:'ready' },
-]
+const BACKEND_URL = 'http://127.0.0.1:8000'
 
-const metrics = [
-  { label:'Critical fixed this month', value:'17',  color:'#00E576', trend:'▲ up from 12' },
-  { label:'Avg fix time (MTTR)',        value:'6.2d',color:'#4D9FFF', trend:'▼ down from 7.3d' },
-  { label:'Security score',            value:'64',  color:'#FFB020', trend:'▼ down from 67' },
-  { label:'Total findings closed',     value:'142', color:'#00E576', trend:'▲ up from 119' },
-]
-
-const typeColors: Record<string,{color:string;bg:string}> = {
-  PDF:  {color:'#FF6B6B',bg:'rgba(192,55,42,0.15)'},
-  CSV:  {color:'#00E576',bg:'rgba(0,229,118,0.10)'},
-  JSON: {color:'#4D9FFF',bg:'rgba(27,127,255,0.15)'},
+type Report = {
+  id: number             // this is the scan_id
+  project_id: number
+  project_name: string
+  repo_url: string | null
+  scan_type: string
+  status: string
+  started_at: string
+  finished_at: string | null
+  findings_count: number
 }
 
-const catColors: Record<string,string> = {
-  Executive:'#FFB020', Compliance:'#4D9FFF', Technical:'#00E576', SBOM:'#00D4FF',
+type Project = { id: number; name: string }
+
+const scanTypeLabels: Record<string, string> = {
+  sast: 'SAST', sca: 'SCA', iac: 'IaC', secrets: 'Secrets',
+}
+
+const scanTypeColors: Record<string, { color: string; bg: string }> = {
+  sast:    { color: '#FF6B6B', bg: 'rgba(192,55,42,0.15)' },
+  sca:     { color: '#00E576', bg: 'rgba(0,229,118,0.10)' },
+  iac:     { color: '#4D9FFF', bg: 'rgba(27,127,255,0.15)' },
+  secrets: { color: '#FFB020', bg: 'rgba(184,106,0,0.15)' },
+}
+
+function formatDate(iso: string): string {
+  return new Date(iso).toLocaleString(undefined, {
+    month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit',
+  })
 }
 
 export default function ReportsPage() {
-  const [generating, setGenerating] = useState(false)
-  const [filter, setFilter] = useState('All')
-  const [generated, setGenerated] = useState(false)
+  const [reports, setReports] = useState<Report[]>([])
+  const [projects, setProjects] = useState<Project[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [projectFilter, setProjectFilter] = useState<string>('all')
+  const [downloadingId, setDownloadingId] = useState<number | null>(null)
 
-  const handleGenerate = () => {
-    setGenerating(true)
-    setTimeout(() => { setGenerating(false); setGenerated(true) }, 2500)
+  useEffect(() => {
+    fetch(`${BACKEND_URL}/api/projects`)
+      .then(r => r.json())
+      .then(d => setProjects(d.projects || []))
+      .catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    async function load() {
+      setLoading(true)
+      setError(null)
+      try {
+        const params = new URLSearchParams()
+        if (projectFilter !== 'all') params.set('project_id', projectFilter)
+        const res = await fetch(`${BACKEND_URL}/api/reports?${params.toString()}`)
+        if (!res.ok) throw new Error(`Backend error ${res.status}`)
+        const data = await res.json()
+        if (!cancelled) setReports(data.reports || [])
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load reports')
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+    load()
+    return () => { cancelled = true }
+  }, [projectFilter])
+
+  async function downloadReport(scanId: number, scanType: string, projectName: string) {
+    setDownloadingId(scanId)
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/reports/${scanId}/pdf`)
+      if (!res.ok) throw new Error(`Backend error ${res.status}`)
+      const blob = await res.blob()
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `secureflow_${scanType}_${projectName}_scan${scanId}.pdf`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      window.URL.revokeObjectURL(url)
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Download failed')
+    } finally {
+      setDownloadingId(null)
+    }
   }
 
-  const filtered = reports.filter(r => filter === 'All' || r.category === filter)
+  const totalFindings = reports.reduce((sum, r) => sum + r.findings_count, 0)
+  const completed = reports.filter(r => r.status === 'completed').length
 
   return (
-    <div style={{display:'flex',flexDirection:'column',height:'100%',overflow:'hidden',fontFamily:'var(--body)'}}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', fontFamily: 'var(--body)' }}>
 
       {/* TOP BAR */}
-      <div style={{height:56,flexShrink:0,display:'flex',alignItems:'center',justifyContent:'space-between',padding:'0 20px',borderBottom:'1px solid rgba(255,255,255,0.06)',background:'var(--bg)'}}>
-        <div style={{display:'flex',alignItems:'center',gap:6,fontSize:12,color:'rgba(255,255,255,0.35)'}}>
-          <Link href="/dashboard" style={{color:'rgba(255,255,255,0.35)',textDecoration:'none'}}>Dashboard</Link>
+      <div style={{ height: 56, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 20px', borderBottom: '1px solid rgba(255,255,255,0.06)', background: 'var(--bg)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'rgba(255,255,255,0.35)' }}>
+          <Link href="/dashboard" style={{ color: 'rgba(255,255,255,0.35)', textDecoration: 'none' }}>Dashboard</Link>
           <span>/</span>
-          <span style={{color:'#F0F4FF',fontWeight:500}}>Reports</span>
+          <span style={{ color: '#F0F4FF', fontWeight: 500 }}>Reports</span>
         </div>
-        <div style={{display:'flex',gap:10}}>
-          <select value={filter} onChange={e=>setFilter(e.target.value)}
-            style={{padding:'6px 10px',borderRadius:7,border:'1px solid rgba(255,255,255,0.1)',background:'rgba(255,255,255,0.05)',color:'#F0F4FF',fontSize:12,outline:'none',cursor:'pointer',fontFamily:'var(--body)'}}>
-            {['All','Executive','Compliance','Technical','SBOM'].map(c=>(
-              <option key={c} value={c} style={{background:'#0D1B2E'}}>{c}</option>
-            ))}
-          </select>
-          <button onClick={handleGenerate} disabled={generating}
-            style={{padding:'7px 16px',borderRadius:7,border:'none',background:generating?'rgba(27,127,255,0.5)':'#1B7FFF',color:'#fff',fontSize:12,fontWeight:600,cursor:generating?'not-allowed':'pointer',fontFamily:'var(--font)',display:'flex',alignItems:'center',gap:6}}>
-            {generating
-              ?<><span style={{display:'inline-block',width:12,height:12,border:'2px solid rgba(255,255,255,0.3)',borderTopColor:'#fff',borderRadius:'50%',animation:'spin 0.7s linear infinite'}}/>Generating...</>
-              :'+ Generate Report'}
-          </button>
-        </div>
+        <select
+          value={projectFilter}
+          onChange={e => setProjectFilter(e.target.value)}
+          style={{ padding: '6px 10px', borderRadius: 7, border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.05)', color: '#F0F4FF', fontSize: 12, outline: 'none', cursor: 'pointer', fontFamily: 'var(--body)' }}
+        >
+          <option value="all" style={{ background: '#0D1B2E' }}>All projects</option>
+          {projects.map(p => (
+            <option key={p.id} value={p.id} style={{ background: '#0D1B2E' }}>{p.name}</option>
+          ))}
+        </select>
       </div>
 
-      <div style={{flex:1,overflowY:'auto',padding:20,background:'rgba(6,13,24,0.8)'}}>
+      {/* CONTENT */}
+      <div style={{ flex: 1, overflowY: 'auto', padding: 20, background: 'rgba(6,13,24,0.8)' }}>
 
-        {/* Success banner */}
-        {generated && (
-          <div style={{marginBottom:16,padding:'10px 16px',background:'rgba(0,229,118,0.08)',border:'1px solid rgba(0,229,118,0.2)',borderRadius:10,display:'flex',alignItems:'center',gap:10,fontSize:12}}>
-            <span style={{fontSize:16}}>✅</span>
-            <span style={{color:'#00E576',fontWeight:500}}>Report generated!</span>
-            <span style={{color:'rgba(255,255,255,0.5)'}}>Executive Security Summary — June 2025 is ready to download.</span>
-            <button onClick={()=>setGenerated(false)} style={{marginLeft:'auto',background:'none',border:'none',color:'rgba(255,255,255,0.3)',cursor:'pointer',fontSize:16}}>✕</button>
+        {/* Summary */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 12, marginBottom: 20 }}>
+          <StatCard label="Total scans" value={reports.length} accentColor="#1B7FFF" />
+          <StatCard label="Completed" value={completed} accentColor="#00E576" />
+          <StatCard label="Total findings across scans" value={totalFindings} accentColor="#FFB020" />
+        </div>
+
+        {error && (
+          <div style={{ padding: '12px 16px', borderRadius: 8, background: 'rgba(192,55,42,0.12)', color: '#FF6B6B', fontSize: 12, marginBottom: 16 }}>
+            {error} — is the backend running at {BACKEND_URL}?
           </div>
         )}
 
-        {/* METRICS */}
-        <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:12,marginBottom:20}}>
-          {metrics.map(m=>(
-            <div key={m.label} style={{background:'rgba(13,27,46,0.8)',border:'1px solid rgba(255,255,255,0.07)',borderRadius:12,padding:'14px 16px'}}>
-              <div style={{fontSize:10,fontWeight:500,textTransform:'uppercase',letterSpacing:'0.6px',color:'rgba(255,255,255,0.35)',marginBottom:6}}>{m.label}</div>
-              <div style={{fontSize:28,fontWeight:300,color:m.color,letterSpacing:'-1px',lineHeight:1}}>{m.value}</div>
-              <div style={{fontSize:10,color:'rgba(255,255,255,0.3)',marginTop:5}}>{m.trend}</div>
-              <div style={{marginTop:10,height:3,borderRadius:2,background:m.color,width:28}}/>
-            </div>
-          ))}
+        <div style={{ fontSize: 12, fontWeight: 600, color: 'rgba(255,255,255,0.35)', textTransform: 'uppercase', letterSpacing: '0.6px', marginBottom: 12 }}>
+          Scan reports ({reports.length})
         </div>
 
-        <div style={{display:'grid',gridTemplateColumns:'2fr 1fr',gap:16}}>
+        <div style={{ background: 'rgba(13,27,46,0.8)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 12, overflow: 'hidden' }}>
+          {loading && (
+            <div style={{ padding: 24, fontSize: 12, color: 'rgba(255,255,255,0.4)' }}>Loading reports…</div>
+          )}
 
-          {/* REPORTS LIST */}
-          <div>
-            <div style={{fontSize:12,fontWeight:600,color:'rgba(255,255,255,0.35)',textTransform:'uppercase',letterSpacing:'0.6px',marginBottom:12}}>
-              Available reports ({filtered.length})
+          {!loading && reports.length === 0 && !error && (
+            <div style={{ padding: 24, fontSize: 12, color: 'rgba(255,255,255,0.4)' }}>
+              No scans yet — run a scan from SAST, SCA, IaC, or Secrets to generate a report.
             </div>
-            <div style={{background:'rgba(13,27,46,0.8)',border:'1px solid rgba(255,255,255,0.07)',borderRadius:12,overflow:'hidden'}}>
-              {filtered.map((r,i)=>{
-                const tc=typeColors[r.type]||{color:'#aaa',bg:'rgba(255,255,255,0.07)'}
-                const catColor=catColors[r.category]||'#aaa'
-                return(
-                  <div key={r.id} style={{display:'flex',alignItems:'center',gap:14,padding:'14px 16px',borderBottom:i<filtered.length-1?'1px solid rgba(255,255,255,0.05)':'none',transition:'background .12s'}}
-                    onMouseEnter={e=>(e.currentTarget.style.background='rgba(255,255,255,0.02)')}
-                    onMouseLeave={e=>(e.currentTarget.style.background='transparent')}>
-                    {/* Icon */}
-                    <div style={{width:40,height:40,borderRadius:9,background:tc.bg,display:'flex',alignItems:'center',justifyContent:'center',fontSize:11,fontWeight:700,color:tc.color,flexShrink:0,fontFamily:'var(--mono)'}}>
-                      {r.type}
-                    </div>
-                    {/* Info */}
-                    <div style={{flex:1,minWidth:0}}>
-                      <div style={{fontSize:13,fontWeight:500,color:'#F0F4FF',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{r.name}</div>
-                      <div style={{display:'flex',alignItems:'center',gap:8,marginTop:4}}>
-                        <span style={{fontSize:10,color:'rgba(255,255,255,0.3)'}}>{r.date}</span>
-                        <span style={{fontSize:10,color:'rgba(255,255,255,0.2)'}}>·</span>
-                        <span style={{fontSize:10,color:'rgba(255,255,255,0.3)'}}>{r.size}</span>
-                        <span style={{fontSize:10,color:'rgba(255,255,255,0.2)'}}>·</span>
-                        <span style={{fontSize:10,padding:'1px 6px',borderRadius:4,background:`${catColor}18`,color:catColor}}>{r.category}</span>
-                      </div>
-                    </div>
-                    {/* Download */}
-                    <button style={{padding:'6px 14px',borderRadius:7,border:'1px solid rgba(255,255,255,0.1)',background:'transparent',color:'rgba(255,255,255,0.5)',fontSize:11,cursor:'pointer',fontFamily:'var(--body)',whiteSpace:'nowrap',flexShrink:0,transition:'all .15s'}}
-                      onMouseEnter={e=>{e.currentTarget.style.borderColor='rgba(27,127,255,0.4)';e.currentTarget.style.color='#4D9FFF'}}
-                      onMouseLeave={e=>{e.currentTarget.style.borderColor='rgba(255,255,255,0.1)';e.currentTarget.style.color='rgba(255,255,255,0.5)'}}>
-                      ↓ Download
-                    </button>
-                  </div>
-                )
-              })}
-            </div>
-          </div>
+          )}
 
-          {/* RIGHT — Generate + Schedule */}
-          <div style={{display:'flex',flexDirection:'column',gap:14}}>
-
-            {/* Generate custom */}
-            <div style={{background:'rgba(13,27,46,0.8)',border:'1px solid rgba(255,255,255,0.07)',borderRadius:12,padding:16}}>
-              <div style={{fontSize:12,fontWeight:600,color:'#F0F4FF',fontFamily:'var(--font)',marginBottom:14}}>Generate custom report</div>
-              <div style={{marginBottom:12}}>
-                <label style={{display:'block',fontSize:11,fontWeight:500,color:'rgba(255,255,255,0.5)',marginBottom:5}}>Report type</label>
-                <select style={{width:'100%',padding:'8px 10px',borderRadius:7,border:'1px solid rgba(255,255,255,0.1)',background:'rgba(13,27,46,0.9)',color:'#F0F4FF',fontSize:12,outline:'none',cursor:'pointer',fontFamily:'var(--body)'}}>
-                  <option style={{background:'#0D1B2E'}}>Executive Summary</option>
-                  <option style={{background:'#0D1B2E'}}>Technical Full Report</option>
-                  <option style={{background:'#0D1B2E'}}>Compliance Report</option>
-                  <option style={{background:'#0D1B2E'}}>SBOM Export</option>
-                  <option style={{background:'#0D1B2E'}}>Vulnerability CSV</option>
-                </select>
-              </div>
-              <div style={{marginBottom:12}}>
-                <label style={{display:'block',fontSize:11,fontWeight:500,color:'rgba(255,255,255,0.5)',marginBottom:5}}>Date range</label>
-                <select style={{width:'100%',padding:'8px 10px',borderRadius:7,border:'1px solid rgba(255,255,255,0.1)',background:'rgba(13,27,46,0.9)',color:'#F0F4FF',fontSize:12,outline:'none',cursor:'pointer',fontFamily:'var(--body)'}}>
-                  <option style={{background:'#0D1B2E'}}>Last 30 days</option>
-                  <option style={{background:'#0D1B2E'}}>Last 90 days</option>
-                  <option style={{background:'#0D1B2E'}}>This quarter</option>
-                  <option style={{background:'#0D1B2E'}}>Custom range</option>
-                </select>
-              </div>
-              <div style={{marginBottom:14}}>
-                <label style={{display:'block',fontSize:11,fontWeight:500,color:'rgba(255,255,255,0.5)',marginBottom:5}}>Include modules</label>
-                <div style={{display:'flex',flexWrap:'wrap',gap:6}}>
-                  {['SAST','SCA','Secrets','IaC','Container','DAST'].map(m=>(
-                    <label key={m} style={{display:'flex',alignItems:'center',gap:5,fontSize:11,color:'rgba(255,255,255,0.5)',cursor:'pointer'}}>
-                      <input type="checkbox" defaultChecked style={{accentColor:'#1B7FFF'}}/>{m}
-                    </label>
-                  ))}
+          {!loading && reports.map((r, i) => {
+            const tc = scanTypeColors[r.scan_type] || { color: '#aaa', bg: 'rgba(255,255,255,0.07)' }
+            const isDownloading = downloadingId === r.id
+            return (
+              <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 16px', borderBottom: i < reports.length - 1 ? '1px solid rgba(255,255,255,0.05)' : 'none', transition: 'background .12s' }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.02)')}
+                onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+              >
+                <div style={{ width: 44, height: 44, borderRadius: 9, background: tc.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, color: tc.color, flexShrink: 0, fontFamily: 'var(--mono)' }}>
+                  {scanTypeLabels[r.scan_type] || r.scan_type}
                 </div>
-              </div>
-              <button onClick={handleGenerate} disabled={generating}
-                style={{width:'100%',padding:'9px',borderRadius:8,border:'none',background:generating?'rgba(27,127,255,0.5)':'#1B7FFF',color:'#fff',fontSize:12,fontWeight:600,cursor:generating?'not-allowed':'pointer',fontFamily:'var(--font)',display:'flex',alignItems:'center',justifyContent:'center',gap:6}}>
-                {generating?<><span style={{display:'inline-block',width:12,height:12,border:'2px solid rgba(255,255,255,0.3)',borderTopColor:'#fff',borderRadius:'50%',animation:'spin 0.7s linear infinite'}}/>Generating...</>:'Generate Report →'}
-              </button>
-            </div>
-
-            {/* Scheduled reports */}
-            <div style={{background:'rgba(13,27,46,0.8)',border:'1px solid rgba(255,255,255,0.07)',borderRadius:12,padding:16}}>
-              <div style={{fontSize:12,fontWeight:600,color:'#F0F4FF',fontFamily:'var(--font)',marginBottom:12}}>Scheduled reports</div>
-              {[
-                {name:'Weekly Executive Summary', schedule:'Every Monday 9AM', next:'Jun 2'},
-                {name:'Monthly Compliance Report', schedule:'1st of each month', next:'Jun 1'},
-                {name:'Daily Vuln Export CSV', schedule:'Every day midnight', next:'Tomorrow'},
-              ].map((s,i)=>(
-                <div key={s.name} style={{display:'flex',alignItems:'center',gap:10,padding:'8px 0',borderBottom:i<2?'1px solid rgba(255,255,255,0.05)':'none'}}>
-                  <div style={{flex:1}}>
-                    <div style={{fontSize:12,fontWeight:500,color:'#F0F4FF'}}>{s.name}</div>
-                    <div style={{fontSize:10,color:'rgba(255,255,255,0.3)',marginTop:2}}>{s.schedule} · Next: {s.next}</div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 500, color: '#F0F4FF' }}>
+                    {r.project_name} — {scanTypeLabels[r.scan_type] || r.scan_type} scan
                   </div>
-                  <div style={{width:8,height:8,borderRadius:'50%',background:'#00E576',flexShrink:0}}/>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
+                    <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.3)' }}>{formatDate(r.started_at)}</span>
+                    <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.2)' }}>·</span>
+                    <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.3)' }}>{r.findings_count} findings</span>
+                    <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.2)' }}>·</span>
+                    <span style={{ fontSize: 10, color: r.status === 'completed' ? '#00E576' : r.status === 'failed' ? '#FF6B6B' : 'rgba(255,255,255,0.4)' }}>{r.status}</span>
+                  </div>
                 </div>
-              ))}
-            </div>
-          </div>
+                <button
+                  onClick={() => downloadReport(r.id, r.scan_type, r.project_name)}
+                  disabled={isDownloading || r.status !== 'completed'}
+                  style={{ padding: '6px 14px', borderRadius: 7, border: '1px solid rgba(255,255,255,0.1)', background: 'transparent', color: r.status !== 'completed' ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.5)', fontSize: 11, cursor: r.status !== 'completed' ? 'not-allowed' : 'pointer', fontFamily: 'var(--body)', whiteSpace: 'nowrap', flexShrink: 0, transition: 'all .15s' }}
+                >
+                  {isDownloading ? 'Generating…' : '↓ Download PDF'}
+                </button>
+              </div>
+            )
+          })}
         </div>
       </div>
-      <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
     </div>
   )
 }
