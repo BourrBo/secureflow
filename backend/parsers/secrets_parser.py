@@ -7,6 +7,7 @@ treat all four scanners uniformly via the `scanner` field.
 
 from secret_detection.scanner import ScanResult
 from mappings.iso27001 import get_iso_control
+from utils.severity import normalize_severity
 
 
 # Secret detection findings don't map to a single CWE — leave the mapping
@@ -38,7 +39,7 @@ def normalize_secret_findings(result: ScanResult):
 
         findings.append({
             "title": f.rule_id,
-            "severity": f.severity.value,  # already lowercase: critical/high/medium/low
+            "severity": normalize_severity(f.severity.value, scanner="secrets"),
             "file": f.file_path,
             "line": f.line,
             "description": f.description + f" (matched: {f.match})",
