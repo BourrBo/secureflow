@@ -1,0 +1,73 @@
+SecureFlow Backend — Setup (updated)
+=====================================
+
+1. Create and activate the virtual environment
+------------------------------------------------
+python -m venv .\venv
+.\venv\Scripts\Activate
+python -m pip install --upgrade pip
+
+
+2. Install Python dependencies
+------------------------------------------------
+pip install -r requirements.txt
+
+This now installs (in addition to the original fastapi/uvicorn/pydantic/
+gitpython/reportlab/python-multipart):
+  - passlib[bcrypt]   -> password hashing for auth
+  - PyJWT             -> session tokens for auth
+  - google-auth       -> Google OAuth login
+  - semgrep           -> SAST scanner (pip-installable)
+  - checkov           -> IaC scanner (pip-installable)
+
+
+3. Install Trivy (SCA / container scanner) — NOT pip-installable
+------------------------------------------------
+Trivy is a standalone binary, not a Python package, so it needs a separate
+install on Windows:
+
+Option A — Chocolatey (if you have it):
+    choco install trivy
+
+Option B — manual:
+    1. Download the latest Windows zip from:
+       https://github.com/aquasecurity/trivy/releases
+    2. Extract trivy.exe somewhere permanent, e.g. C:\tools\trivy\
+    3. Add that folder to your PATH (System Properties > Environment
+       Variables > Path > New)
+    4. Restart your terminal, then confirm with:
+       trivy --version
+
+
+4. Environment variables (set before running in anything beyond local dev)
+------------------------------------------------
+JWT_SECRET       -> HMAC key for auth session tokens. MUST change from the
+                    default placeholder before any real deployment.
+GOOGLE_CLIENT_ID -> only needed if you want Google sign-in working
+SECUREFLOW_DB    -> optional, defaults to secureflow.db in the backend folder
+CORS_ORIGINS     -> optional, comma-separated extra allowed origins
+
+Example (PowerShell):
+    $env:JWT_SECRET = "some-long-random-string"
+
+
+5. Run the backend
+------------------------------------------------
+uvicorn main:app --reload --host 0.0.0.0 --port 8000
+
+Visit http://127.0.0.1:8000/docs for the interactive API explorer.
+
+
+6. One-time migration (only needed once, already done if you've run it)
+------------------------------------------------
+If you're updating an existing secureflow.db created before the severity
+normalization fix, run this once to clean up old inconsistent severity
+values (WARNING/ERROR/lowercase mixed in with CRITICAL/HIGH/MEDIUM/LOW):
+
+    python scripts/backfill_severity.py
+
+
+7. Fresh start (wipe everything and reinstall)
+------------------------------------------------
+Remove-Item -Recurse -Force .\venv
+Remove-Item .\secureflow.db      # careful — this deletes all scan history

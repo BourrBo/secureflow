@@ -3,3 +3,9 @@ uvicorn
 pydantic
 gitpython
 reportlab
+python-multipart
+passlib[bcrypt]
+PyJWT
+google-auth
+semgrep
+checkov

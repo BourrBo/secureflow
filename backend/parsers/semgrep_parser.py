@@ -1,4 +1,5 @@
 from mappings.iso27001 import get_iso_control
+from utils.severity import normalize_severity
 
 
 def get_code_context(filepath: str, start_line: int, end_line: int, context: int = 2):
@@ -43,7 +44,7 @@ def normalize_findings(data):
 
         findings.append({
             "title": result["check_id"].split(".")[-1],
-            "severity": result["extra"]["severity"],
+            "severity": normalize_severity(result["extra"]["severity"], scanner="semgrep"),
             "file": result["path"],
             "line": start_line,
             "description": result["extra"]["message"],

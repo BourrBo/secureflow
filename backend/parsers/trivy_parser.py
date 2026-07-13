@@ -1,4 +1,5 @@
 from mappings.iso27001 import get_iso_control
+from utils.severity import normalize_severity
 
 
 def _extract_cvss_score(vuln: dict):
@@ -29,7 +30,7 @@ def normalize_trivy_findings(data):
 
             findings.append({
                 "title": vuln.get("PkgName", "Unknown Package"),
-                "severity": vuln.get("Severity", "UNKNOWN"),
+                "severity": normalize_severity(vuln.get("Severity", "UNKNOWN"), scanner="trivy"),
                 "file": target,
                 "line": 0,
                 "description": vuln.get("Title", ""),

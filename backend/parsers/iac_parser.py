@@ -1,4 +1,5 @@
 from mappings.iso27001 import get_iso_control
+from utils.severity import normalize_severity
 
 
 def normalize_iac_findings(data: dict) -> list:
@@ -29,7 +30,7 @@ def normalize_iac_findings(data: dict) -> list:
 
             findings.append({
                 "title":       check.get("check_id", "UNKNOWN"),
-                "severity":    _map_severity(check.get("severity")),
+                "severity":    normalize_severity(check.get("severity"), scanner="checkov"),
                 "file":        file_path,
                 "line":        line,
                 "description": check.get("check_result", {}).get("result", "FAILED")
@@ -44,10 +45,3 @@ def normalize_iac_findings(data: dict) -> list:
             })
 
     return findings
-
-
-def _map_severity(severity: str) -> str:
-    """Checkov severities: CRITICAL, HIGH, MEDIUM, LOW, INFO — normalize to uppercase."""
-    if not severity:
-        return "MEDIUM"
-    return severity.upper()
