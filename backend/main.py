@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from routes.sast import router as sast_router
 from routes.secrets import router as secrets_router
 from routes.reports import router as reports_router
+from routes.container import router as container_router
 
 app = FastAPI(
     title="SecureFlow API",
@@ -28,6 +29,8 @@ app.add_middleware(
 app.include_router(sast_router)
 app.include_router(secrets_router)
 app.include_router(reports_router)
+app.include_router(container_router)
+
 
 @app.get("/")
 def home():

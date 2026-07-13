@@ -79,7 +79,7 @@ export function ViewStandardLink() {
 // ── Calls the backend to build an ISO/IEC 27001-styled PDF report and downloads it ──
 export async function exportISOReport(
   findings: any[],
-  scanType: "sast" | "sca" | "iac" | "secrets" | "all",
+  scanType: "sast" | "sca" | "iac" | "secrets" | "all" | "container",
   repoLabel: string,
 ) {
   const response = await fetch(`${BACKEND_URL}/api/reports/pdf`, {
@@ -109,7 +109,7 @@ export function ExportReportButton({
   findings, scanType, repoLabel,
 }: {
   findings: any[];
-  scanType: "sast" | "sca" | "iac" | "secrets" | "all";
+  scanType: "sast" | "sca" | "iac" | "secrets" | "all" | "container";
   repoLabel: string;
 }) {
   const [busy, setBusy] = useState(false);
