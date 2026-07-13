@@ -143,10 +143,11 @@ _CWE_TO_CONTROL = {
 
 # ── Scanner-level default when no specific CWE mapping applies ──
 _SCANNER_DEFAULT_CONTROL = {
-    "semgrep": "8.28",   # SAST -> Secure coding
-    "trivy":   "8.8",    # SCA  -> Management of technical vulnerabilities
-    "checkov": "8.9",    # IaC  -> Configuration management
-    "secrets": "5.17",   # Secret detection -> Authentication information
+    "semgrep":   "8.28",  # SAST -> Secure coding
+    "trivy":     "8.8",   # SCA  -> Management of technical vulnerabilities
+    "checkov":   "8.9",   # IaC  -> Configuration management
+    "secrets":   "5.17",  # Secret detection -> Authentication information
+    "container": "8.8",   # Container image scan -> Management of technical vulnerabilities
 }
 
 # ── Absolute fallback if scanner name itself is unrecognized ──
