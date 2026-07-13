@@ -1,0 +1,54 @@
+import {
+  ShieldAlert,
+  AlertTriangle,
+  Info,
+  Package,
+} from "lucide-react";
+
+import { StatCard } from "@/components/dashboard/primitives";
+
+type Props = {
+  critical: number;
+  high: number;
+  medium: number;
+  low: number;
+};
+
+export function ContainerStats({
+  critical,
+  high,
+  medium,
+  low,
+}: Props) {
+  return (
+    <div className="grid gap-4 md:grid-cols-4">
+      <StatCard
+        label="Critical"
+        value={String(critical)}
+        tone="critical"
+        icon={ShieldAlert}
+      />
+
+      <StatCard
+        label="High"
+        value={String(high)}
+        tone="warning"
+        icon={AlertTriangle}
+      />
+
+      <StatCard
+        label="Medium"
+        value={String(medium)}
+        tone="info"
+        icon={Info}
+      />
+
+      <StatCard
+        label="Low"
+        value={String(low)}
+        tone="info"
+        icon={Package}
+      />
+    </div>
+  );
+}

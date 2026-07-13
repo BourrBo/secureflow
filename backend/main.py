@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from routes.sast import router as sast_router
 from routes.secrets import router as secrets_router
 from routes.reports import router as reports_router
+from routes.container import router as container_router
 from routes.findings import router as findings_router
 from routes.projects import router as projects_router
 from routes.compliance import router as compliance_router
@@ -38,6 +39,8 @@ app.add_middleware(
 app.include_router(sast_router)
 app.include_router(secrets_router)
 app.include_router(reports_router)
+app.include_router(container_router)
+
 app.include_router(findings_router)
 app.include_router(projects_router)
 app.include_router(compliance_router)
