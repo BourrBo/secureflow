@@ -35,6 +35,7 @@ SCAN_TYPE_LABELS = {
     "sca":     "SCA — Software Composition Analysis",
     "iac":     "IaC — Infrastructure as Code Security",
     "secrets": "Secret Detection",
+    "container": "Container Image Scanning",
     "all":     "Combined Security Findings",
 }
 
