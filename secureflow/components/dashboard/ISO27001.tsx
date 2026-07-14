@@ -12,7 +12,7 @@ const BACKEND_URL = 'http://127.0.0.1:8000'
 // ── Calls the backend to build an ISO/IEC 27001-styled PDF report and downloads it ──
 export async function exportISOReport(
   findings: any[],
-  scanType: 'sast' | 'sca' | 'iac' | 'secrets' | 'all',
+  scanType: 'sast' | 'sca' | 'iac' | 'secrets' | 'container' | 'all',
   repoLabel: string
 ) {
   const response = await fetch(`${BACKEND_URL}/api/reports/pdf`, {
@@ -42,7 +42,7 @@ export function ExportReportButton({
   findings, scanType, repoLabel,
 }: {
   findings: any[]
-  scanType: 'sast' | 'sca' | 'iac' | 'secrets' | 'all'
+  scanType: 'sast' | 'sca' | 'iac' | 'secrets' | 'container' | 'all'
   repoLabel: string
 }) {
   const [busy, setBusy] = useState(false)
