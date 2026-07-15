@@ -8,6 +8,7 @@ from routes.container import router as container_router
 from routes.findings import router as findings_router
 from routes.projects import router as projects_router
 from routes.compliance import router as compliance_router
+from routes.dast import router as dast_router
 
 from services.db_service import init_db
 
@@ -44,6 +45,7 @@ app.include_router(container_router)
 app.include_router(findings_router)
 app.include_router(projects_router)
 app.include_router(compliance_router)
+app.include_router(dast_router)
 
 @app.get("/")
 def home():

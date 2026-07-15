@@ -1,0 +1,36 @@
+[
+  {
+    "nodeName": "https://testphp.vulnweb.com/",
+    "sourceid": "1",
+    "other": "Failed to connect.\nZAP attempted to connect via: https://testphp.vulnweb.com/",
+    "method": "GET",
+    "evidence": "",
+    "pluginId": "10106",
+    "cweid": "311",
+    "confidence": "Medium",
+    "sourceMessageId": 1,
+    "wascid": "4",
+    "description": "The site is only served under HTTP and not HTTPS.",
+    "messageId": "11",
+    "inputVector": "",
+    "url": "http://testphp.vulnweb.com/",
+    "tags": {
+      "OWASP_2025_A04": "https://owasp.org/Top10/2025/A04_2025-Cryptographic_Failures/",
+      "OWASP_2021_A05": "https://owasp.org/Top10/A05_2021-Security_Misconfiguration/",
+      "POLICY_QA_FULL": "",
+      "POLICY_PENTEST": "",
+      "OWASP_2017_A06": "https://owasp.org/www-project-top-ten/2017/A6_2017-Security_Misconfiguration.html",
+      "WSTG-v42-CRYP-03": "https://owasp.org/www-project-web-security-testing-guide/v42/4-Web_Application_Security_Testing/09-Testing_for_Weak_Cryptography/03-Testing_for_Sensitive_Information_Sent_via_Unencrypted_Channels",
+      "CWE-311": "https://cwe.mitre.org/data/definitions/311.html"
+    },
+    "reference": "https://cheatsheetseries.owasp.org/cheatsheets/Transport_Layer_Protection_Cheat_Sheet.html\nhttps://letsencrypt.org/",
+    "solution": "Configure your web or application server to use SSL (https).",
+    "alert": "HTTP Only Site",
+    "param": "",
+    "attack": "",
+    "name": "HTTP Only Site",
+    "risk": "Medium",
+    "id": "0",
+    "alertRef": "10106"
+  }
+]
