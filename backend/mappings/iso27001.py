@@ -148,7 +148,6 @@ _SCANNER_DEFAULT_CONTROL = {
     "checkov":   "8.9",   # IaC  -> Configuration management
     "secrets":   "5.17",  # Secret detection -> Authentication information
     "container": "8.8",   # Container image scan -> Management of technical vulnerabilities
-    "dast":      "8.29",  # Dynamic scan -> Security testing in development and acceptance
 }
 
 # ── Absolute fallback if scanner name itself is unrecognized ──

@@ -9,4 +9,3 @@ PyJWT
 google-auth
 semgrep
 checkov
-python-owasp-zap-v2.4
