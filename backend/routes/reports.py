@@ -24,6 +24,15 @@ class ReportRequest(BaseModel):
     scan_type: str = "all"          # "sast" | "sca" | "iac" | "secrets" | "all"
     repo_label: Optional[str] = ""  # e.g. repo URL or uploaded file name, shown on the cover page
 
+    # VAPT "Closing Report" metadata — all optional, sensible defaults applied
+    client_name: Optional[str] = "Client"
+    client_contact: Optional[str] = ""
+    client_email: Optional[str] = ""
+    prepared_by: Optional[str] = "SecureFlow Automated Platform"
+    reviewed_by: Optional[str] = "SecureFlow Automated Platform"
+    released_by: Optional[str] = "SecureFlow Automated Platform"
+    doc_version: Optional[str] = "1.0"
+
 
 @router.post("/api/reports/pdf")
 def generate_report(request: ReportRequest):
@@ -33,11 +42,18 @@ def generate_report(request: ReportRequest):
             findings=findings_dicts,
             scan_type=request.scan_type,
             repo_label=request.repo_label or "",
+            client_name=request.client_name or "Client",
+            client_contact=request.client_contact or "",
+            client_email=request.client_email or "",
+            prepared_by=request.prepared_by or "SecureFlow Automated Platform",
+            reviewed_by=request.reviewed_by or "SecureFlow Automated Platform",
+            released_by=request.released_by or "SecureFlow Automated Platform",
+            doc_version=request.doc_version or "1.0",
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-    filename = f"secureflow_{request.scan_type}_iso27001_report.pdf"
+    filename = f"secureflow_{request.scan_type}_vapt_report.pdf"
 
     return Response(
         content=pdf_bytes,
@@ -76,7 +92,7 @@ def regenerate_report(scan_id: int):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-    filename = f"secureflow_{scan['scan_type']}_scan{scan_id}_iso27001_report.pdf"
+    filename = f"secureflow_{scan['scan_type']}_scan{scan_id}_vapt_report.pdf"
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
