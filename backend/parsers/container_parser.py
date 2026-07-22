@@ -2,6 +2,7 @@ from typing import List
 
 from mappings.iso27001 import get_iso_control
 from utils.severity import normalize_severity
+from services.epss_service import get_epss_scores
 
 
 def _extract_cvss_score(vuln: dict):
@@ -25,6 +26,7 @@ def normalize_container_findings(data: dict) -> List[dict]:
     """
 
     findings = []
+    cves = set()
 
     image_name = data.get("ArtifactName", "Unknown Image")
 
@@ -42,6 +44,12 @@ def normalize_container_findings(data: dict) -> List[dict]:
             cwe = cwe_ids[0] if cwe_ids else "CWE-000"
 
             iso = get_iso_control(cwe=cwe, scanner="container")
+
+            # Trivy's VulnerabilityID is the CVE (or GHSA/DSA id) for image
+            # vulns — same field trivy_parser.py uses for SCA findings.
+            cve = vulnerability.get("VulnerabilityID") or "N/A"
+            if cve != "N/A" and cve.startswith("CVE-"):
+                cves.add(cve)
 
             findings.append({
 
@@ -82,11 +90,31 @@ def normalize_container_findings(data: dict) -> List[dict]:
 
                 "ecosystem": ecosystem,
 
+                "cve": cve,
+
+                "epss_score": "N/A",
+                "epss_percentile": "N/A",
+                "epss_risk_level": "LOW",
+
                 "iso27001_control": iso["id"],
 
                 "iso27001_control_name": iso["name"],
 
                 "iso27001_description": iso["description"],
             })
+
+    if cves:
+
+        epss = get_epss_scores(list(cves))
+
+        for finding in findings:
+
+            cve = finding["cve"]
+
+            if cve in epss:
+
+                finding["epss_score"] = epss[cve]["score"]
+                finding["epss_percentile"] = epss[cve]["percentile"]
+                finding["epss_risk_level"] = epss[cve]["risk_level"]
 
     return findings

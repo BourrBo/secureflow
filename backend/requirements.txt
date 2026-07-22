@@ -9,3 +9,4 @@ PyJWT
 google-auth
 semgrep
 checkov
+epss-api

@@ -52,6 +52,12 @@ def normalize_findings(data):
             "cwe": cwe,
             "owasp": owasp,
             "scanner": "semgrep",
+            # SAST findings are pattern matches, not published vulnerabilities —
+            # there is no CVE to key an EPSS score off, so this is legitimately N/A.
+            "cve": "N/A",
+            "epss_score": "N/A",
+            "epss_percentile": "N/A",
+            "epss_risk_level": "LOW",
             "iso27001_control": iso["id"],
             "iso27001_control_name": iso["name"],
             "iso27001_description": iso["description"],

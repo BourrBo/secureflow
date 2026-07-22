@@ -62,7 +62,6 @@ def scan(request: ScanRequest):
         insert_findings(sca_scan_id, trivy_findings)
         finish_scan(sast_scan_id, "completed")
         finish_scan(sca_scan_id, "completed")
-
         return semgrep_findings + trivy_findings
 
     except Exception as e:
@@ -103,6 +102,8 @@ def scan_local(file: UploadFile = File(...)):
 
         trivy_results = run_trivy(extract_path)
         trivy_findings = normalize_trivy_findings(trivy_results)
+
+        # EPSS enrichment already happens inside normalize_trivy_findings()
 
         insert_findings(sast_scan_id, semgrep_findings)
         insert_findings(sca_scan_id, trivy_findings)

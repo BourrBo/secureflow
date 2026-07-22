@@ -28,9 +28,13 @@ class Finding(BaseModel):
     ecosystem: Optional[str] = None
 
     # VAPT-report fields (Laati/Roamassist-style "Detailed Observations")
-    cve: Optional[str] = None                       # e.g. "CVE-2021-23445"; "N/A" if none
-    cvss_vector: Optional[str] = None                # e.g. "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
-    epss_score: Optional[str] = None                 # left as string ("N/A" is a valid value)
+    cve: Optional[str] = None
+    cvss_vector: Optional[str] = None
+
+    # EPSS
+    epss_score: Optional[str] = None
+    epss_percentile: Optional[str] = None
+    epss_risk_level: Optional[str] = None            # left as string ("N/A" is a valid value)
     affected_location: Optional[str] = None          # base host/target, e.g. "https://roamassist.in"
     affected_path: Optional[str] = None              # full vulnerable path/URL/port
     affected_parameter: Optional[str] = None         # vulnerable parameter/field name

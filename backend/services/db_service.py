@@ -101,9 +101,20 @@ def init_db():
                 installed_version      TEXT,
                 fixed_version          TEXT,
                 cvss                   REAL,
-                ecosystem              TEXT
+                ecosystem              TEXT,
+                cve                    TEXT,
+                epss_score             TEXT
             )
         """)
+
+        # Migration for DBs created before EPSS enrichment existed —
+        # CREATE TABLE IF NOT EXISTS above only helps fresh DBs, so
+        # existing findings tables need the columns added explicitly.
+        existing_cols = {row["name"] for row in conn.execute("PRAGMA table_info(findings)")}
+        if "cve" not in existing_cols:
+            conn.execute("ALTER TABLE findings ADD COLUMN cve TEXT")
+        if "epss_score" not in existing_cols:
+            conn.execute("ALTER TABLE findings ADD COLUMN epss_score TEXT")
 
         conn.execute("CREATE INDEX IF NOT EXISTS idx_scans_project ON scans(project_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_findings_scan ON findings(scan_id)")
@@ -206,6 +217,8 @@ def insert_findings(scan_id: int, findings: List) -> None:
             data.get("fixed_version"),
             data.get("cvss"),
             data.get("ecosystem"),
+            data.get("cve"),
+            data.get("epss_score"),
         ))
 
     with get_db() as conn:
@@ -215,8 +228,8 @@ def insert_findings(scan_id: int, findings: List) -> None:
                 scan_id, title, severity, file, line, description, rule,
                 cwe, owasp, scanner, iso27001_control, iso27001_control_name,
                 iso27001_description, code_context, installed_version,
-                fixed_version, cvss, ecosystem
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                fixed_version, cvss, ecosystem, cve, epss_score
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             rows,
         )
