@@ -21,6 +21,9 @@ type BackendFinding = {
   iso27001_control?:      string
   iso27001_control_name?: string
   iso27001_description?:  string
+  epss_score?:        string | null
+  epss_percentile?:   string | null
+  epss_risk_level?:   string | null
 }
 
 type Dependency = {
@@ -38,6 +41,17 @@ type Dependency = {
   iso27001Control:     string
   iso27001ControlName: string
   iso27001Description: string
+  epssScore:         string
+  epssPercentile:    string
+  epssRiskLevel:     string
+}
+
+// ── EPSS risk-level → display color, matching the severity badge palette ──
+const epssRiskColors: Record<string, string> = {
+  CRITICAL: '#FF6B6B',
+  HIGH:     '#FFB020',
+  MEDIUM:   '#4D9FFF',
+  LOW:      'rgba(255,255,255,0.4)',
 }
 
 // ── Map Trivy's severity scale → SecureFlow's display scale ──
@@ -93,6 +107,9 @@ export default function SCAPage() {
         iso27001Control:     item.iso27001_control      || '8.8',
         iso27001ControlName: item.iso27001_control_name || 'Management of technical vulnerabilities',
         iso27001Description: item.iso27001_description  || "Information about technical vulnerabilities of information systems in use shall be obtained, the organization's exposure to such vulnerabilities shall be evaluated and appropriate measures shall be taken.",
+        epssScore:      item.epss_score      || 'N/A',
+        epssPercentile: item.epss_percentile || 'N/A',
+        epssRiskLevel:  item.epss_risk_level || 'LOW',
       }))
   }
 
@@ -224,6 +241,10 @@ export default function SCAPage() {
             fixed_version: d.fixedVersion,
             cvss: d.cvss,
             ecosystem: d.ecosystem,
+            cve: d.cve,
+            epss_score: d.epssScore,
+            epss_percentile: d.epssPercentile,
+            epss_risk_level: d.epssRiskLevel,
           }))}
           scanType="sca"
           repoLabel={scanMode === 'github' ? repoUrl : (selectedFile?.name || '')}
@@ -408,8 +429,8 @@ export default function SCAPage() {
                 ))}
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 80px 90px 90px 1.1fr 60px 70px 80px', padding: '9px 16px', borderBottom: '1px solid rgba(255,255,255,0.06)', background: 'rgba(255,255,255,0.02)' }}>
-                {['Package', 'Ecosystem', 'Installed', 'Fix In', 'CVE', 'CVSS', 'Severity', 'ISO 27001'].map(h => (
+              <div style={{ display: 'grid', gridTemplateColumns: '1.3fr 75px 85px 85px 1fr 55px 75px 65px 75px', padding: '9px 16px', borderBottom: '1px solid rgba(255,255,255,0.06)', background: 'rgba(255,255,255,0.02)' }}>
+                {['Package', 'Ecosystem', 'Installed', 'Fix In', 'CVE', 'CVSS', 'EPSS', 'Severity', 'ISO 27001'].map(h => (
                   <div key={h} style={{ fontSize: 10, fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.5px', color: 'rgba(255,255,255,0.3)' }}>{h}</div>
                 ))}
               </div>
@@ -425,7 +446,7 @@ export default function SCAPage() {
                 return (
                   <div key={dep.id}
                     title={dep.description}
-                    style={{ display: 'grid', gridTemplateColumns: '1.4fr 80px 90px 90px 1.1fr 60px 70px 80px', padding: '11px 16px', alignItems: 'center', borderBottom: i < filtered.length - 1 ? '1px solid rgba(255,255,255,0.04)' : 'none' }}
+                    style={{ display: 'grid', gridTemplateColumns: '1.3fr 75px 85px 85px 1fr 55px 75px 65px 75px', padding: '11px 16px', alignItems: 'center', borderBottom: i < filtered.length - 1 ? '1px solid rgba(255,255,255,0.04)' : 'none' }}
                     onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.02)' }}
                     onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
                   >
@@ -445,6 +466,12 @@ export default function SCAPage() {
                     <div style={{ fontSize: 11, fontFamily: 'var(--mono)', color: '#4D9FFF', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{dep.cve}</div>
                     <div style={{ fontSize: 13, fontWeight: 500, color: !dep.cvss ? 'rgba(255,255,255,0.3)' : dep.cvss >= 9 ? '#FF6B6B' : dep.cvss >= 7 ? '#FFB020' : '#4D9FFF' }}>
                       {dep.cvss ?? 'N/A'}
+                    </div>
+                    <div
+                      title={dep.epssScore !== 'N/A' ? `EPSS percentile: ${dep.epssPercentile}` : 'No EPSS data for this CVE'}
+                      style={{ fontSize: 11, fontFamily: 'var(--mono)', fontWeight: 600, color: epssRiskColors[dep.epssRiskLevel] || 'rgba(255,255,255,0.3)' }}
+                    >
+                      {dep.epssScore !== 'N/A' ? `${(parseFloat(dep.epssScore) * 100).toFixed(1)}%` : 'N/A'}
                     </div>
                     <div>
                       <span style={{ fontSize: 10, fontWeight: 500, padding: '2px 8px', borderRadius: 10, background: sev.bg, color: sev.color }}>

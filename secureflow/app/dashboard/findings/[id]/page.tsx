@@ -24,6 +24,21 @@ type Finding = {
   iso27001_control: string | null
   iso27001_control_name: string | null
   code_context: { ln: number; code: string; highlight?: boolean }[]
+  cve: string | null
+  epss_score: string | null
+  epss_percentile: string | null
+  epss_risk_level: string | null
+}
+
+const epssRiskColors: Record<string, string> = {
+  CRITICAL: '#FF6B6B',
+  HIGH:     '#FFB020',
+  MEDIUM:   '#4D9FFF',
+  LOW:      'rgba(255,255,255,0.4)',
+}
+
+function hasEpss(f: Finding): boolean {
+  return !!f.epss_score && f.epss_score !== 'N/A'
 }
 
 type Project = { id: number; name: string }
@@ -152,8 +167,8 @@ export default function FindingsPage() {
 
         {/* Findings table */}
         <div style={{ background: 'rgba(13,27,46,0.8)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 12, overflow: 'hidden' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 90px 100px', padding: '10px 16px', borderBottom: '1px solid rgba(255,255,255,0.06)', background: 'rgba(255,255,255,0.02)' }}>
-            {['Finding', 'Project', 'Scanner', 'Severity', 'ISO Control'].map(h => (
+          <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 75px 90px 100px', padding: '10px 16px', borderBottom: '1px solid rgba(255,255,255,0.06)', background: 'rgba(255,255,255,0.02)' }}>
+            {['Finding', 'Project', 'Scanner', 'EPSS', 'Severity', 'ISO Control'].map(h => (
               <div key={h} style={{ fontSize: 10, fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.5px', color: 'rgba(255,255,255,0.3)' }}>{h}</div>
             ))}
           </div>
@@ -174,7 +189,7 @@ export default function FindingsPage() {
               <div key={f.id} style={{ borderBottom: i < findings.length - 1 ? '1px solid rgba(255,255,255,0.05)' : 'none' }}>
                 <div
                   onClick={() => setExpanded(isOpen ? null : f.id)}
-                  style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 90px 100px', padding: '12px 16px', alignItems: 'center', cursor: 'pointer', transition: 'background .12s' }}
+                  style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 75px 90px 100px', padding: '12px 16px', alignItems: 'center', cursor: 'pointer', transition: 'background .12s' }}
                   onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.03)')}
                   onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
                 >
@@ -186,6 +201,12 @@ export default function FindingsPage() {
                   </div>
                   <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.5)' }}>{f.project_name}</div>
                   <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.5)' }}>{scannerLabels[f.scanner] || f.scanner}</div>
+                  <div
+                    title={hasEpss(f) ? `EPSS percentile: ${f.epss_percentile}` : 'No EPSS data (no associated CVE)'}
+                    style={{ fontSize: 11, fontFamily: 'var(--mono)', fontWeight: 600, color: hasEpss(f) ? (epssRiskColors[f.epss_risk_level || 'LOW'] || 'rgba(255,255,255,0.3)') : 'rgba(255,255,255,0.25)' }}
+                  >
+                    {hasEpss(f) ? `${(parseFloat(f.epss_score as string) * 100).toFixed(1)}%` : '—'}
+                  </div>
                   <div><SeverityBadge severity={toSeverityKey(f.severity)} /></div>
                   <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', fontFamily: 'var(--mono)' }}>{f.iso27001_control || '—'}</div>
                 </div>
@@ -195,10 +216,16 @@ export default function FindingsPage() {
                     <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.6)', marginBottom: 10, lineHeight: 1.5 }}>
                       {f.description || 'No description available.'}
                     </div>
-                    <div style={{ display: 'flex', gap: 16, fontSize: 11, color: 'rgba(255,255,255,0.4)', marginBottom: 10 }}>
+                    <div style={{ display: 'flex', gap: 16, fontSize: 11, color: 'rgba(255,255,255,0.4)', marginBottom: 10, flexWrap: 'wrap' }}>
+                      {f.cve && f.cve !== 'N/A' && <span>CVE: {f.cve}</span>}
                       {f.cwe && <span>CWE: {f.cwe}</span>}
                       {f.owasp && <span>OWASP: {f.owasp}</span>}
                       {f.iso27001_control_name && <span>ISO {f.iso27001_control}: {f.iso27001_control_name}</span>}
+                      {hasEpss(f) && (
+                        <span style={{ color: epssRiskColors[f.epss_risk_level || 'LOW'] || 'rgba(255,255,255,0.4)' }}>
+                          EPSS: {(parseFloat(f.epss_score as string) * 100).toFixed(2)}% (percentile {f.epss_percentile}) — {f.epss_risk_level} exploitation likelihood
+                        </span>
+                      )}
                     </div>
                     {f.code_context && f.code_context.length > 0 && (
                       <div style={{ background: '#0A121F', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 8, padding: '10px 0', fontFamily: 'var(--mono)', fontSize: 11 }}>
