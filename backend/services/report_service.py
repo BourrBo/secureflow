@@ -35,6 +35,20 @@ from reportlab.platypus import (
 
 from mappings.iso27001 import ANNEX_A_CONTROLS
 
+# ──────────────────────────────────────────────────────────────────────
+# Laati Consulting brand palette — Teal / White / Dark Grey
+# (SecureFlow is a Laati Consulting product; every report is branded
+#  "Laati Consulting Pvt. Ltd. presents SecureFlow", matching the firm's
+#  manual VAPT report template.)
+# ──────────────────────────────────────────────────────────────────────
+TEAL = "#0E7C86"
+TEAL_DARK = "#0A5C64"
+GREY_DARK = "#2B2B2B"
+GREY_MID = "#5A5A5A"
+GREY_LINE = "#DDDDDD"
+COMPANY_NAME = "Laati Consulting Pvt. Ltd."
+COMPANY_WEB = "www.laaticonsulting.com"
+
 SCAN_TYPE_LABELS = {
     "sast":      "SAST — Static Application Security Testing",
     "sca":       "SCA — Software Composition Analysis",
@@ -54,17 +68,17 @@ TOOL_BY_SCANNER = {
 # Severity ordering + colors reused throughout the report
 _SEVERITY_ORDER = ["critical", "high", "medium", "low", "unknown"]
 _SEVERITY_HEX = {
-    "critical": "#C0372A",
-    "high":     "#B86A00",
-    "medium":   "#D9A400",
-    "low":      "#2E8B57",
+    "critical": "#D32F2F",
+    "high":     "#F57C00",
+    "medium":   "#C9A227",
+    "low":      "#43A047",
     "unknown":  "#8A8A8A",
 }
 _SEVERITY_BG_HEX = {
-    "critical": "#F4C7C2",
-    "high":     "#F7DDA8",
-    "medium":   "#FBEBAE",
-    "low":      "#C9EBD7",
+    "critical": "#F7CFCF",
+    "high":     "#FCE1BF",
+    "medium":   "#F5EAC0",
+    "low":      "#CFEAD3",
     "unknown":  "#E5E5E5",
 }
 
@@ -126,30 +140,45 @@ def _overall_status(score: float) -> str:
 def _styles():
     ss = getSampleStyleSheet()
     ss.add(ParagraphStyle(
-        name="CoverKicker", parent=ss["Normal"], fontSize=11,
-        textColor=colors.HexColor("#00E576"), spaceAfter=6,
-        fontName="Helvetica-Bold",
+        name="CoverKicker", parent=ss["Normal"], fontSize=11.5,
+        textColor=colors.white, spaceAfter=4, fontName="Helvetica-Bold",
     ))
     ss.add(ParagraphStyle(
-        name="CoverTitle", parent=ss["Title"], fontSize=28, leading=34,
-        textColor=colors.HexColor("#0D1B2E"), spaceAfter=10,
+        name="CoverBrand", parent=ss["Title"], fontSize=34, leading=38,
+        textColor=colors.white, spaceAfter=4, fontName="Helvetica-Bold",
     ))
     ss.add(ParagraphStyle(
-        name="CoverSub", parent=ss["Normal"], fontSize=13, leading=18,
-        textColor=colors.HexColor("#333333"),
+        name="CoverTagline", parent=ss["Normal"], fontSize=12.5, leading=17,
+        textColor=colors.white, spaceAfter=2,
+    ))
+    ss.add(ParagraphStyle(
+        name="CoverTitle", parent=ss["Title"], fontSize=19, leading=24,
+        textColor=colors.HexColor(GREY_DARK), spaceAfter=8,
+    ))
+    ss.add(ParagraphStyle(
+        name="CoverSub", parent=ss["Normal"], fontSize=12, leading=17,
+        textColor=colors.HexColor(GREY_MID),
     ))
     ss.add(ParagraphStyle(
         name="CoverConfidential", parent=ss["Normal"], fontSize=9,
-        leading=13, textColor=colors.HexColor("#B86A00"),
+        leading=13, textColor=colors.HexColor(GREY_MID),
         fontName="Helvetica-Oblique",
     ))
     ss.add(ParagraphStyle(
+        name="HeaderLogo", parent=ss["Normal"], fontSize=13,
+        textColor=colors.HexColor(TEAL), fontName="Helvetica-Bold",
+    ))
+    ss.add(ParagraphStyle(
+        name="HeaderRight", parent=ss["Normal"], fontSize=8, leading=10,
+        textColor=colors.HexColor(GREY_MID), alignment=2,  # right
+    ))
+    ss.add(ParagraphStyle(
         name="SectionHeading", parent=ss["Heading1"], fontSize=15,
-        textColor=colors.HexColor("#0D1B2E"), spaceBefore=18, spaceAfter=10,
+        textColor=colors.HexColor("#0E7C86"), spaceBefore=18, spaceAfter=10,
     ))
     ss.add(ParagraphStyle(
         name="SubHeading", parent=ss["Heading2"], fontSize=11.5,
-        textColor=colors.HexColor("#0D1B2E"), spaceBefore=12, spaceAfter=6,
+        textColor=colors.HexColor("#0E7C86"), spaceBefore=12, spaceAfter=6,
     ))
     ss.add(ParagraphStyle(
         name="Body", parent=ss["Normal"], fontSize=9.5, leading=13.5,
@@ -157,7 +186,7 @@ def _styles():
     ))
     ss.add(ParagraphStyle(
         name="ControlName", parent=ss["Normal"], fontSize=10.5,
-        fontName="Helvetica-Bold", textColor=colors.HexColor("#0D1B2E"),
+        fontName="Helvetica-Bold", textColor=colors.HexColor("#0E7C86"),
     ))
     ss.add(ParagraphStyle(
         name="ControlLabel", parent=ss["Normal"], fontSize=9,
@@ -174,7 +203,7 @@ def _styles():
     ))
     ss.add(ParagraphStyle(
         name="CellRef", parent=ss["Normal"], fontSize=9, leading=11,
-        fontName="Helvetica-Bold", textColor=colors.HexColor("#0D1B2E"),
+        fontName="Helvetica-Bold", textColor=colors.HexColor("#0E7C86"),
     ))
     ss.add(ParagraphStyle(
         name="ObsFieldLabel", parent=ss["Normal"], fontSize=8.5,
@@ -192,29 +221,116 @@ def _escape(text: str) -> str:
 
 
 # ──────────────────────────────────────────────────────────────────────
+# Page chrome — Laati header/footer, teal cover banner, watermark
+# ──────────────────────────────────────────────────────────────────────
+
+_COVER_BAND_HEIGHT = 9.0 * cm
+
+
+def _draw_footer(canvas, doc):
+    canvas.saveState()
+    page_width, _ = A4
+    y = 1.1 * cm
+    canvas.setFont("Helvetica", 8)
+    canvas.setFillColor(colors.HexColor(GREY_MID))
+    canvas.drawString(2 * cm, y, f"Page | {canvas.getPageNumber()}")
+    canvas.drawCentredString(page_width / 2, y, COMPANY_WEB)
+    canvas.drawRightString(page_width - 2 * cm, y, "Confidential")
+    canvas.restoreState()
+
+
+def _draw_watermark(canvas, doc):
+    canvas.saveState()
+    page_width, page_height = A4
+    try:
+        canvas.setFillAlpha(0.035)
+    except Exception:
+        pass
+    canvas.setFillColor(colors.HexColor("#B0B0B0"))
+    canvas.setFont("Helvetica-Bold", 55)
+    canvas.translate(page_width / 2, page_height / 2)
+    canvas.rotate(45)
+    canvas.drawCentredString(0, 0, "CONFIDENTIAL")
+    canvas.restoreState()
+
+
+def _draw_header(canvas, doc, report_title: str):
+    canvas.saveState()
+    page_width, page_height = A4
+    top_y = page_height - 1.3 * cm
+
+    canvas.setFont("Helvetica-Bold", 13)
+    canvas.setFillColor(colors.HexColor(TEAL))
+    canvas.drawString(2 * cm, top_y, "laati")
+    canvas.setFillColor(colors.HexColor("#F5A623"))
+    canvas.circle(2 * cm + 1.72 * cm, top_y + 0.32 * cm, 0.06 * cm, stroke=0, fill=1)
+
+    canvas.setFont("Helvetica", 8)
+    canvas.setFillColor(colors.HexColor(GREY_MID))
+    canvas.drawRightString(page_width - 2 * cm, top_y + 0.15 * cm, report_title)
+
+    canvas.setStrokeColor(colors.HexColor(TEAL))
+    canvas.setLineWidth(1)
+    canvas.line(2 * cm, top_y - 0.15 * cm, page_width - 2 * cm, top_y - 0.15 * cm)
+    canvas.restoreState()
+
+
+def _draw_cover_band(canvas, doc):
+    canvas.saveState()
+    page_width, page_height = A4
+    canvas.setFillColor(colors.HexColor(TEAL))
+    canvas.rect(0, page_height - _COVER_BAND_HEIGHT, page_width, _COVER_BAND_HEIGHT, stroke=0, fill=1)
+    # thin accent line under the band
+    canvas.setStrokeColor(colors.HexColor("#F5A623"))
+    canvas.setLineWidth(2.5)
+    canvas.line(0, page_height - _COVER_BAND_HEIGHT, page_width, page_height - _COVER_BAND_HEIGHT)
+    canvas.restoreState()
+
+
+def _make_page_callbacks(report_title: str):
+    """Returns (on_first_page, on_later_pages) canvas callbacks for doc.build()."""
+
+    def on_first_page(canvas, doc):
+        _draw_cover_band(canvas, doc)
+        _draw_footer(canvas, doc)
+
+    def on_later_pages(canvas, doc):
+        _draw_header(canvas, doc, report_title)
+        _draw_watermark(canvas, doc)
+        _draw_footer(canvas, doc)
+
+    return on_first_page, on_later_pages
+
+
+# ──────────────────────────────────────────────────────────────────────
 # 1. Cover page
 # ──────────────────────────────────────────────────────────────────────
 
 def _cover_page(story, styles, scan_type: str, repo_label: str, client_name: str,
                  report_date: str, doc_version: str):
-    story.append(Spacer(1, 2 * cm))
-    story.append(Paragraph("SECUREFLOW &nbsp;·&nbsp; ENTERPRISE APPSEC PLATFORM", styles["CoverKicker"]))
-    story.append(HRFlowable(width="100%", thickness=1.4, color=colors.HexColor("#00E576"), spaceAfter=18))
+    scan_label = SCAN_TYPE_LABELS.get(scan_type, scan_type.upper())
 
-    story.append(Paragraph("SecureFlow presents", styles["CoverSub"]))
-    story.append(Spacer(1, 0.2 * cm))
-    story.append(Paragraph(
-        f"{SCAN_TYPE_LABELS.get(scan_type, scan_type.upper())}<br/>Closing Report v{doc_version}",
-        styles["CoverTitle"],
-    ))
+    # Content inside the teal banner drawn by _draw_cover_decorations (white text)
     story.append(Spacer(1, 0.3 * cm))
-    story.append(Paragraph(f"TO<br/><b>{_escape(client_name)}</b>", styles["CoverSub"]))
-    story.append(Spacer(1, 0.3 * cm))
-    story.append(Paragraph(f"Target: {_escape(repo_label or '—')}", styles["CoverSub"]))
+    story.append(Paragraph("LAATI CONSULTING PVT. LTD.", styles["CoverKicker"]))
+    story.append(Paragraph("PRESENTS", styles["CoverKicker"]))
+    story.append(Spacer(1, 0.9 * cm))
+    story.append(Paragraph("SecureFlow&trade;", styles["CoverBrand"]))
+    story.append(Paragraph("Enterprise Application Security Platform", styles["CoverTagline"]))
+    story.append(Spacer(1, 3.2 * cm))  # push remaining content below the teal banner
+
+    # White area below the banner
+    story.append(Paragraph(f"{scan_label}<br/>Application Security Assessment Report v{doc_version}",
+                            styles["CoverTitle"]))
+    story.append(Spacer(1, 0.4 * cm))
+    story.append(Paragraph(f"Prepared for", styles["CoverSub"]))
+    story.append(Paragraph(f"<b>{_escape(client_name)}</b>", styles["CoverSub"]))
+    story.append(Spacer(1, 0.35 * cm))
+    story.append(Paragraph(f"Repository / Target — {_escape(repo_label or '—')}", styles["CoverSub"]))
     story.append(Paragraph(f"Date — {report_date}", styles["CoverSub"]))
 
     story.append(Spacer(1, 3 * cm))
-    story.append(HRFlowable(width="100%", thickness=0.75, color=colors.HexColor("#CCCCCC")))
+    story.append(HRFlowable(width="100%", thickness=0.75, color=colors.HexColor(GREY_LINE)))
     story.append(Spacer(1, 0.3 * cm))
     story.append(Paragraph(
         "Confidentiality Clause: This report is intended for the information and use of the "
@@ -238,13 +354,14 @@ def _document_control(story, styles, doc_version: str, report_date: str,
         ["Document Title", "SecureFlow Security Findings Report"],
         ["Document Version", doc_version],
         ["Prepared by", prepared_by],
+        ["Powered by", COMPANY_NAME],
         ["Reviewed by", reviewed_by],
         ["Released by", released_by],
         ["Release Date", report_date],
     ]
     t = Table(prep_rows, colWidths=[4.5 * cm, 9.5 * cm])
     t.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#0D1B2E")),
+        ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#0E7C86")),
         ("TEXTCOLOR", (0, 0), (0, -1), colors.white),
         ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
         ("FONTSIZE", (0, 0), (-1, -1), 9),
@@ -262,7 +379,7 @@ def _document_control(story, styles, doc_version: str, report_date: str,
     ]
     t2 = Table(dist_rows, colWidths=[4 * cm, 5 * cm, 5 * cm])
     t2.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0D1B2E")),
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0E7C86")),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
         ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
         ("FONTSIZE", (0, 0), (-1, -1), 9),
@@ -301,7 +418,7 @@ def _introduction(story, styles, scan_type: str, repo_label: str, report_date: s
                   [repo_label or "—", SCAN_TYPE_LABELS.get(scan_type, scan_type.upper()), report_date]]
     t = Table(scope_rows, colWidths=[6 * cm, 5.5 * cm, 2.5 * cm])
     t.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0D1B2E")),
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0E7C86")),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
         ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
         ("FONTSIZE", (0, 0), (-1, -1), 9),
@@ -328,7 +445,7 @@ def _introduction(story, styles, scan_type: str, repo_label: str, report_date: s
         tool_rows.append(["—", "—"])
     t3 = Table(tool_rows, colWidths=[7 * cm, 7 * cm])
     t3.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0D1B2E")),
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0E7C86")),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
         ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
         ("FONTSIZE", (0, 0), (-1, -1), 9),
@@ -358,7 +475,7 @@ def _introduction(story, styles, scan_type: str, repo_label: str, report_date: s
             wt_rows.append([sev.capitalize(), label, str(score)])
     t4 = Table(wt_rows, colWidths=[4 * cm, 6 * cm, 4 * cm])
     t4.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0D1B2E")),
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0E7C86")),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
         ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
         ("FONTSIZE", (0, 0), (-1, -1), 8.5),
@@ -393,7 +510,7 @@ def _executive_summary(story, styles, counts: dict, findings: list):
     rating = _vulnerability_rating(max_score)
     status = _overall_status(max_score)
 
-    rating_hex = _SEVERITY_HEX.get(rating.lower(), "#0D1B2E")
+    rating_hex = _SEVERITY_HEX.get(rating.lower(), "#0E7C86")
     story.append(Paragraph(
         f"SecureFlow has completed the security assessment. The target's vulnerability level is "
         f"rated at <b>{max_score}</b>, categorizing it as <b>{rating}</b> — Status: "
@@ -427,7 +544,7 @@ def _executive_summary(story, styles, counts: dict, findings: list):
     col_widths = [1 * cm, 4.5 * cm, 1.8 * cm, 4 * cm, 2.7 * cm, 2 * cm]
     t = Table(rows, colWidths=col_widths, repeatRows=1)
     t.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0D1B2E")),
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0E7C86")),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
         ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
         ("FONTSIZE", (0, 0), (-1, 0), 8.5),
@@ -455,7 +572,7 @@ def _severity_distribution(story, styles, counts: dict, repo_label: str):
              str(counts.get("medium", 0)), str(counts.get("low", 0)), str(total)]]
     t = Table(rows, colWidths=[5.5 * cm, 2 * cm, 2 * cm, 2 * cm, 2 * cm, 1.5 * cm])
     t.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0D1B2E")),
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0E7C86")),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
         ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
         ("FONTNAME", (0, 1), (-1, 1), "Helvetica-Bold"),
@@ -492,7 +609,7 @@ def _severity_distribution(story, styles, counts: dict, repo_label: str):
 # 6. Detailed Observations — one full record per finding
 # ──────────────────────────────────────────────────────────────────────
 
-def _obs_field_row(label, value, styles, label_bg="#0D1B2E"):
+def _obs_field_row(label, value, styles, label_bg="#0E7C86"):
     return [
         Paragraph(label, styles["ObsFieldLabel"]),
         Paragraph(value, styles["ObsFieldValue"]),
@@ -589,6 +706,46 @@ def _conclusion(story, styles, counts: dict, repo_label: str):
         "Section 2 to reduce the risk of exploitation and cascading security failures.",
         styles["Body"],
     ))
+    story.append(Spacer(1, 0.6 * cm))
+
+    story.append(Paragraph("Strengths", styles["SubHeading"]))
+    story.append(Paragraph(
+        "Automated coverage across the enabled scan modules was completed without interruption, "
+        "and findings were normalized into a single, ISO/IEC 27001:2022-mapped model for "
+        "consistent tracking across future assessments.",
+        styles["Body"],
+    ))
+
+    story.append(Paragraph("Weaknesses", styles["SubHeading"]))
+    if total > 0:
+        top_sev = next((s for s in _SEVERITY_ORDER if counts.get(s, 0) > 0), "low")
+        story.append(Paragraph(
+            f"The assessment identified {total} open finding(s) across the target, with the "
+            f"highest-severity observations rated <b>{top_sev.capitalize()}</b>-tier. "
+            f"Refer to Section 2 for the full list of affected locations and remediation guidance.",
+            styles["Body"],
+        ))
+    else:
+        story.append(Paragraph(
+            "No open findings were identified in this assessment.", styles["Body"],
+        ))
+
+    story.append(Paragraph("Recommended Next Steps", styles["SubHeading"]))
+    story.append(ListFlowable([
+        ListItem(Paragraph("Prioritize remediation of Critical and High severity findings first.", styles["Body"])),
+        ListItem(Paragraph("Re-run the affected scan module(s) after fixes to confirm closure.", styles["Body"])),
+        ListItem(Paragraph("Incorporate SecureFlow scanning into the CI/CD pipeline for continuous coverage.", styles["Body"])),
+    ], bulletType="bullet"))
+
+    story.append(Spacer(1, 1 * cm))
+    story.append(HRFlowable(width="100%", thickness=0.75, color=colors.HexColor(GREY_LINE)))
+    story.append(Spacer(1, 0.3 * cm))
+    story.append(Paragraph("Prepared by", styles["ControlLabel"]))
+    story.append(Paragraph(
+        f"<b>SecureFlow Enterprise AppSec Platform</b><br/>Powered by <b>{COMPANY_NAME}</b>"
+        f"<br/>{COMPANY_WEB}",
+        styles["Body"],
+    ))
     story.append(PageBreak())
 
 
@@ -677,5 +834,10 @@ def generate_pdf_report(
     _conclusion(story, styles, counts, repo_label)
     _annex_a_appendix(story, styles, control_ids)
 
-    doc.build(story)
+    report_title = (
+        f"{COMPANY_NAME}  |  SecureFlow  |  "
+        f"{SCAN_TYPE_LABELS.get(scan_type, scan_type.upper())} Assessment Report v{doc_version}"
+    )
+    on_first_page, on_later_pages = _make_page_callbacks(report_title)
+    doc.build(story, onFirstPage=on_first_page, onLaterPages=on_later_pages)
     return buf.getvalue()
