@@ -44,6 +44,7 @@ DEFAULT_ZAP_PORT = "8080"
 # var always wins if set; this list is just a convenience fallback, and is
 # only ever used when ZAP_AUTOSTART=true.
 _COMMON_WINDOWS_ZAP_PATHS = [
+    r"C:\secureflow\Tools\ZAP\Zed Attack Proxy\zap.bat",
     r"C:\Program Files\ZAP\Zed Attack Proxy\zap.bat",
     r"C:\Program Files (x86)\ZAP\Zed Attack Proxy\zap.bat",
     os.path.expanduser(r"~\AppData\Local\Programs\ZAP\Zed Attack Proxy\zap.bat"),
@@ -65,7 +66,7 @@ def get_zap_config() -> dict:
     host = os.environ.get("ZAP_HOST", DEFAULT_ZAP_HOST)
     port = os.environ.get("ZAP_PORT", DEFAULT_ZAP_PORT)
     api_key = os.environ.get("ZAP_API_KEY", "")
-    autostart = os.environ.get("ZAP_AUTOSTART", "false").strip().lower() == "true"
+    autostart = os.environ.get("ZAP_AUTOSTART", "true").strip().lower() == "true"
     zap_path = os.environ.get("ZAP_PATH") or _find_zap_executable()
 
     return {
@@ -175,6 +176,7 @@ def ensure_zap_reachable(config: dict, timeout_secs: int = 90) -> None:
         # starting it.
         subprocess.Popen(
             command,
+            cwd=os.path.dirname(zap_path),
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             stdin=subprocess.DEVNULL,
