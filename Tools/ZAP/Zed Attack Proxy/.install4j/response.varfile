@@ -1,0 +1,6 @@
+# install4j response file for Zed Attack Proxy by Checkmarx 2.17.0
+installationType$Integer=0
+sys.adminRights$Boolean=true
+sys.installationDir=C\:\\Program Files\\ZAP\\Zed Attack Proxy
+sys.languageId=en
+sys.programGroupName=ZAP\\Zed Attack Proxy
