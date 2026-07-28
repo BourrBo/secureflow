@@ -113,8 +113,12 @@ export default function DASTPage() {
             <option value="quick" style={{background:'#0D1B2E'}}>Quick Scan</option>
           </select>
 
-          <button style={{padding:'7px 12px',borderRadius:7,border:'1px solid rgba(255,255,255,0.1)',background:'transparent',color:'rgba(255,255,255,0.5)',fontSize:12,cursor:'pointer'}}>Export</button>
-          
+          {/* <button style={{padding:'7px 12px',borderRadius:7,border:'1px solid rgba(255,255,255,0.1)',background:'transparent',color:'rgba(255,255,255,0.5)',fontSize:12,cursor:'pointer'}}>Export</button> */}
+          <ExportReportButton
+          findings={findings}
+          scanType="all"
+          repoLabel={targetUrl}
+        />
           <button onClick={handleScan} disabled={scanning}
             style={{padding:'7px 16px',borderRadius:7,border:'none',background:scanning?'rgba(27,127,255,0.5)':'#1B7FFF',color:'#fff',fontSize:12,fontWeight:600,cursor:scanning?'not-allowed':'pointer',fontFamily:'var(--font)',display:'flex',alignItems:'center',gap:6}}>
             {scanning?<><span style={{display:'inline-block',width:12,height:12,border:'2px solid rgba(255,255,255,0.3)',borderTopColor:'#fff',borderRadius:'50%',animation:'spin 0.7s linear infinite'}}/> Scanning...</>:'▶ Start Scan'}
