@@ -1,11 +1,15 @@
+import logging
+
 from mappings.iso27001 import get_iso_control
 from utils.severity import normalize_severity
+
+logger = logging.getLogger(__name__)
 
 
 def get_code_context(filepath: str, start_line: int, end_line: int, context: int = 2):
     """Read a few lines of real source around the finding, for display in the UI."""
     try:
-        with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
+        with open(filepath, encoding="utf-8", errors="ignore") as f:
             lines = f.readlines()
 
         start = max(0, start_line - 1 - context)
@@ -19,7 +23,8 @@ def get_code_context(filepath: str, start_line: int, end_line: int, context: int
             }
             for i in range(start, end)
         ]
-    except Exception:
+    except OSError as exc:
+        logger.debug("Could not read source context from %s: %s", filepath, exc)
         return []
 
 

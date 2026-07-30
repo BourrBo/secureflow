@@ -1,24 +1,26 @@
+import logging
+
 from fastapi import APIRouter, HTTPException
-from typing import List
 
 from models.container_request import ContainerScanRequest
 from models.finding import Finding
-from scanners.container_runner import run_container_scan
 from parsers.container_parser import normalize_container_findings
-
+from scanners.container_runner import run_container_scan
 from services.db_service import (
-    get_or_create_project,
     create_scan,
     finish_scan,
+    get_or_create_project,
     insert_findings,
 )
 
 router = APIRouter()
 
+logger = logging.getLogger(__name__)
+
 
 @router.post(
     "/api/container/scan",
-    response_model=List[Finding],
+    response_model=list[Finding],
 )
 def scan_container(request: ContainerScanRequest):
     """
@@ -48,10 +50,13 @@ def scan_container(request: ContainerScanRequest):
         return findings
 
     except Exception as e:
+        # must still mark the scan failed and return a clean 500 instead of
+        # a raw traceback.
+        logger.exception("Container scan failed for %s", request.image_name)
 
         finish_scan(scan_id, "failed")
 
         raise HTTPException(
             status_code=500,
             detail=str(e)
-        )
+        ) from e

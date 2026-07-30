@@ -1,10 +1,9 @@
 
 import logging
 import time
-from typing import List
 
-from utils.zap_utils import get_zap_config, ensure_zap_reachable
 from config.dast_profiles import SCAN_PROFILES
+from utils.zap_utils import ensure_zap_reachable, get_zap_config
 
 logger = logging.getLogger(__name__)
 
@@ -102,9 +101,9 @@ def _run_spider(
     try:
         spider_scan_id = zap.spider.scan(target_url)
     except Exception as exc:
-        raise ZapScanError(
-            f"Failed to start spider scan: {exc}"
-        )
+        # exception hierarchy; any failure here must become a ZapScanError.
+        logger.exception("Failed to start spider scan")
+        raise ZapScanError(f"Failed to start spider scan: {exc}") from exc
 
     finished = _poll_until(
         lambda: int(zap.spider.status(spider_scan_id)) >= 100,
@@ -117,8 +116,9 @@ def _run_spider(
     if not finished:
         try:
             zap.spider.stop(spider_scan_id)
-        except Exception:
-            pass
+        except Exception as exc:  # noqa: BLE001 — best-effort cleanup;
+            # any failure to stop is non-fatal, but shouldn't be silent.
+            logger.debug("Failed to stop spider scan %s: %s", spider_scan_id, exc)
 
     return finished
 
@@ -135,7 +135,8 @@ def _run_ajax_spider(
 
     try:
         zap.ajaxSpider.scan(target_url)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — zapv2 has no documented
+        # exception hierarchy; treat any failure to start as non-fatal.
         logger.warning(
             "Unable to start AJAX spider: %s",
             exc,
@@ -153,8 +154,9 @@ def _run_ajax_spider(
     if not finished:
         try:
             zap.ajaxSpider.stop()
-        except Exception:
-            pass
+        except Exception as exc:  # noqa: BLE001 — best-effort cleanup;
+            # any failure to stop is non-fatal, but shouldn't be silent.
+            logger.debug("Failed to stop AJAX spider: %s", exc)
 
     return finished
 
@@ -172,9 +174,9 @@ def _run_active_scan(
     try:
         active_scan_id = zap.ascan.scan(target_url)
     except Exception as exc:
-        raise ZapScanError(
-            f"Failed to start active scan: {exc}"
-        )
+        # exception hierarchy; any failure here must become a ZapScanError.
+        logger.exception("Failed to start active scan")
+        raise ZapScanError(f"Failed to start active scan: {exc}") from exc
 
     finished = _poll_until(
         lambda: int(zap.ascan.status(active_scan_id)) >= 100,
@@ -187,8 +189,9 @@ def _run_active_scan(
     if not finished:
         try:
             zap.ascan.stop(active_scan_id)
-        except Exception:
-            pass
+        except Exception as exc:  # noqa: BLE001 — best-effort cleanup;
+            # any failure to stop is non-fatal, but shouldn't be silent.
+            logger.debug("Failed to stop active scan %s: %s", active_scan_id, exc)
 
     return finished
 
@@ -211,7 +214,7 @@ def _load_profile(scan_mode):
 def run_zap_scan(
     target_url: str,
     scan_mode: str = "standard",
-) -> List[dict]:
+) -> list[dict]:
 
     if not target_url or not target_url.strip():
         raise ZapScanError("target_url must not be empty.")
@@ -262,10 +265,12 @@ def run_zap_scan(
         logger.info("STEP 7",  )
         time.sleep(2)
     except Exception as exc:
+        # exception hierarchy; any failure here must become a ZapScanError.
+        logger.exception("Unable to reach target '%s'", target_url)
         raise ZapScanError(
             f"Unable to reach target '{target_url}'. "
             f"Underlying error: {exc}"
-        )
+        ) from exc
 
     logger.info("STEP 8",  )
 
@@ -314,9 +319,9 @@ def run_zap_scan(
     try:
         alerts = zap.core.alerts(baseurl=target_url)
     except Exception as exc:
-        raise ZapScanError(
-            f"Failed to retrieve alerts from ZAP: {exc}"
-        )
+        # exception hierarchy; any failure here must become a ZapScanError.
+        logger.exception("Failed to retrieve alerts from ZAP")
+        raise ZapScanError(f"Failed to retrieve alerts from ZAP: {exc}") from exc
 
     logger.info(
         "Retrieved %d alerts",
@@ -329,8 +334,9 @@ def run_zap_scan(
             "Hosts discovered: %s",
             ", ".join(hosts) if hosts else "None",
         )
-    except Exception:
-        pass
+    except Exception as exc:  # noqa: BLE001 — purely informational logging;
+        # not worth failing the scan over.
+        logger.debug("Unable to retrieve hosts from ZAP: %s", exc)
 
     try:
         sites = zap.core.sites
@@ -338,8 +344,9 @@ def run_zap_scan(
             "Sites in session: %s",
             ", ".join(sites) if sites else "None",
         )
-    except Exception:
-        pass
+    except Exception as exc:  # noqa: BLE001 — purely informational logging;
+        # not worth failing the scan over.
+        logger.debug("Unable to retrieve sites from ZAP: %s", exc)
 
     severity_summary = {
         "High": 0,

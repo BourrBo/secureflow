@@ -8,7 +8,6 @@ a structured findings list. Pure local computation — no external API calls.
 import os
 import time
 from dataclasses import dataclass, field
-from typing import List, Optional
 
 from .entropy import find_high_entropy_tokens
 from .rules import (
@@ -35,7 +34,7 @@ class SecretFinding:
 @dataclass
 class ScanResult:
     scanned_files: int
-    findings: List[SecretFinding] = field(default_factory=list)
+    findings: list[SecretFinding] = field(default_factory=list)
     duration_ms: int = 0
 
 
@@ -46,7 +45,7 @@ def _redact(value: str) -> str:
     return f"{value[:4]}{'*' * (len(value) - 8)}{value[-4:]}"
 
 
-def _should_ignore(rel_path: str, ignore_patterns: List) -> bool:
+def _should_ignore(rel_path: str, ignore_patterns: list) -> bool:
     return any(pattern.search(rel_path) for pattern in ignore_patterns)
 
 
@@ -55,8 +54,8 @@ def _is_likely_binary(chunk: bytes) -> bool:
     return b"\x00" in chunk[:512]
 
 
-def _walk_files(root_dir: str, ignore_patterns: List) -> List[str]:
-    matched_files: List[str] = []
+def _walk_files(root_dir: str, ignore_patterns: list) -> list[str]:
+    matched_files: list[str] = []
     for dirpath, dirnames, filenames in os.walk(root_dir):
         # prune ignored directories in-place so os.walk doesn't descend into them
         pruned = []
@@ -77,8 +76,8 @@ def _walk_files(root_dir: str, ignore_patterns: List) -> List[str]:
 
 def scan_directory_for_secrets(
     root_dir: str,
-    ignore_patterns: Optional[List] = None,
-    extra_rules: Optional[List[SecretRule]] = None,
+    ignore_patterns: list | None = None,
+    extra_rules: list[SecretRule] | None = None,
     enable_entropy_scan: bool = True,
     entropy_threshold: float = 3.5,
 ) -> ScanResult:
@@ -87,7 +86,7 @@ def scan_directory_for_secrets(
     rules = SECRET_RULES + (extra_rules or [])
 
     files = _walk_files(root_dir, ignore_patterns)
-    findings: List[SecretFinding] = []
+    findings: list[SecretFinding] = []
     scanned_files = 0
     finding_counter = 0
 

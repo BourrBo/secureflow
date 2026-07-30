@@ -1,8 +1,7 @@
-from typing import List
 
 from mappings.iso27001 import get_iso_control
-from utils.severity import normalize_severity
 from services.epss_service import get_epss_scores
+from utils.severity import normalize_severity
 
 
 def _extract_cvss_score(vuln: dict):
@@ -18,7 +17,7 @@ def _extract_cvss_score(vuln: dict):
     return None
 
 
-def normalize_container_findings(data: dict) -> List[dict]:
+def normalize_container_findings(data: dict) -> list[dict]:
     """
     Normalize Trivy container image scan results into the same
     finding structure used by the SecureFlow frontend / database

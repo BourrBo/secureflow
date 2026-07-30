@@ -23,7 +23,7 @@ _SEMGREP_MAP = {
 _CANONICAL = {"CRITICAL", "HIGH", "MEDIUM", "LOW"}
 
 
-def normalize_severity(raw, scanner: str = None) -> str:
+def normalize_severity(raw, scanner: str | None = None) -> str:
     """Returns one of CRITICAL / HIGH / MEDIUM / LOW, regardless of the
     scanner's native vocabulary or casing."""
     if not raw:

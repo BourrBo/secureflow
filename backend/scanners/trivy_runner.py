@@ -26,7 +26,8 @@ def run_trivy(repo_path: str):
         capture_output=True,
         text=True,
         encoding="utf-8",
-        errors="ignore"
+        errors="ignore",
+        check=False,  # returncode is checked manually below, with our own error message
     )
 
     if result.returncode != 0:

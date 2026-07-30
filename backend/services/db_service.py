@@ -15,13 +15,12 @@ Schema:
     findings(id, scan_id, <same fields as models.finding.Finding>)
 """
 
-import os
-import sqlite3
 import json
+import os
 import re
+import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
-from typing import List, Optional
 
 from utils.severity import normalize_severity
 
@@ -135,7 +134,7 @@ def derive_project_name_from_repo_url(repo_url: str) -> str:
 def get_or_create_project(
     name: str,
     source_type: str,
-    repo_url: Optional[str] = None,
+    repo_url: str | None = None,
 ) -> int:
     """Reuses an existing project when the same repo_url (git) or the same
     name (upload) has been scanned before, otherwise creates a new one."""
@@ -189,7 +188,7 @@ def finish_scan(scan_id: int, status: str):
 
 # ── Findings ────────────────────────────────────────────────────────
 
-def insert_findings(scan_id: int, findings: List) -> None:
+def insert_findings(scan_id: int, findings: list) -> None:
     """`findings` is a list of models.finding.Finding instances (or objects
     with the same attributes/model_dump())."""
     if not findings:
@@ -251,7 +250,7 @@ def _row_to_finding_dict(row: sqlite3.Row) -> dict:
 
 # ── Projects ────────────────────────────────────────────────────────
 
-def list_projects() -> List[dict]:
+def list_projects() -> list[dict]:
     """All projects, each annotated with scan_count, last_scan_at, and
     open_findings_count (total findings across all its scans)."""
     with get_db() as conn:
@@ -270,7 +269,7 @@ def list_projects() -> List[dict]:
         return [dict(r) for r in rows]
 
 
-def get_project(project_id: int) -> Optional[dict]:
+def get_project(project_id: int) -> dict | None:
     with get_db() as conn:
         row = conn.execute(
             "SELECT * FROM projects WHERE id = ?", (project_id,)
@@ -278,7 +277,7 @@ def get_project(project_id: int) -> Optional[dict]:
         return dict(row) if row else None
 
 
-def get_scans_for_project(project_id: int) -> List[dict]:
+def get_scans_for_project(project_id: int) -> list[dict]:
     with get_db() as conn:
         rows = conn.execute(
             """
@@ -319,13 +318,13 @@ def delete_project(project_id: int) -> bool:
 
 # ── Scans ───────────────────────────────────────────────────────────
 
-def get_scan(scan_id: int) -> Optional[dict]:
+def get_scan(scan_id: int) -> dict | None:
     with get_db() as conn:
         row = conn.execute("SELECT * FROM scans WHERE id = ?", (scan_id,)).fetchone()
         return dict(row) if row else None
 
 
-def list_scans(project_id: Optional[int] = None) -> List[dict]:
+def list_scans(project_id: int | None = None) -> list[dict]:
     """All completed scans (report-able), with project name attached and a
     findings_count. Powers GET /api/reports."""
     query = """
@@ -353,11 +352,11 @@ def list_scans(project_id: Optional[int] = None) -> List[dict]:
 # ── Findings ────────────────────────────────────────────────────────
 
 def list_findings(
-    project_id: Optional[int] = None,
-    scan_id: Optional[int] = None,
-    severity: Optional[str] = None,
-    scanner: Optional[str] = None,
-) -> List[dict]:
+    project_id: int | None = None,
+    scan_id: int | None = None,
+    severity: str | None = None,
+    scanner: str | None = None,
+) -> list[dict]:
     """Findings joined back to their scan/project, with optional filters.
     Powers GET /api/findings."""
     query = """
@@ -395,7 +394,7 @@ def list_findings(
 
 # ── Compliance ──────────────────────────────────────────────────────
 
-def get_compliance_summary(project_id: Optional[int] = None) -> List[dict]:
+def get_compliance_summary(project_id: int | None = None) -> list[dict]:
     """Groups findings by ISO/IEC 27001:2022 Annex A control, with a
     severity breakdown per control. Powers GET /api/compliance."""
     query = """
@@ -437,7 +436,7 @@ def get_compliance_summary(project_id: Optional[int] = None) -> List[dict]:
 
 # ── Dashboard trend (bonus — same "views on stored data" bucket) ────
 
-def get_findings_trend(days: int = 7) -> List[dict]:
+def get_findings_trend(days: int = 7) -> list[dict]:
     """Findings count per day for the last N days, based on when their
     parent scan started. Powers the dashboard 'Findings trend' chart."""
     with get_db() as conn:

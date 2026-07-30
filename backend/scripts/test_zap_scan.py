@@ -23,8 +23,8 @@ repeatedly while you're getting ZAP set up.
 """
 
 import json
-import sys
 import os
+import sys
 
 # Allow running this script directly (`python scripts/test_zap_scan.py`)
 # without needing the backend package installed — adds the backend/ root
@@ -32,8 +32,8 @@ import os
 # invocation relies on implicitly when run from the backend/ folder.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from scanners.zap_runner import run_zap_scan, ZapScanError
 from parsers.zap_parser import normalize_zap_findings
+from scanners.zap_runner import ZapScanError, run_zap_scan
 
 
 def main():

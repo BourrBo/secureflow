@@ -21,19 +21,30 @@ deliverables):
      bonus section, kept from the previous report version)
 """
 
+import logging
+from datetime import datetime, timezone
 from io import BytesIO
-from datetime import datetime
 
-from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import cm
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.platypus import (
-    SimpleDocTemplate, Paragraph, Spacer, PageBreak, Table, TableStyle,
-    HRFlowable, KeepTogether, ListFlowable, ListItem,
+    HRFlowable,
+    KeepTogether,
+    ListFlowable,
+    ListItem,
+    PageBreak,
+    Paragraph,
+    SimpleDocTemplate,
+    Spacer,
+    Table,
+    TableStyle,
 )
 
 from mappings.iso27001 import ANNEX_A_CONTROLS
+
+logger = logging.getLogger(__name__)
 
 # ──────────────────────────────────────────────────────────────────────
 # Laati Consulting brand palette — Teal / White / Dark Grey
@@ -244,8 +255,10 @@ def _draw_watermark(canvas, doc):
     page_width, page_height = A4
     try:
         canvas.setFillAlpha(0.035)
-    except Exception:
-        pass
+    except (AttributeError, NotImplementedError) as exc:
+        # Not every reportlab canvas backend supports alpha; the watermark
+        # just renders fully opaque instead, which is harmless.
+        logger.debug("setFillAlpha not supported by canvas: %s", exc)
     canvas.setFillColor(colors.HexColor("#B0B0B0"))
     canvas.setFont("Helvetica-Bold", 55)
     canvas.translate(page_width / 2, page_height / 2)
@@ -323,7 +336,7 @@ def _cover_page(story, styles, scan_type: str, repo_label: str, client_name: str
     story.append(Paragraph(f"{scan_label}<br/>Application Security Assessment Report v{doc_version}",
                             styles["CoverTitle"]))
     story.append(Spacer(1, 0.4 * cm))
-    story.append(Paragraph(f"Prepared for", styles["CoverSub"]))
+    story.append(Paragraph("Prepared for", styles["CoverSub"]))
     story.append(Paragraph(f"<b>{_escape(client_name)}</b>", styles["CoverSub"]))
     story.append(Spacer(1, 0.35 * cm))
     story.append(Paragraph(f"Repository / Target — {_escape(repo_label or '—')}", styles["CoverSub"]))
@@ -808,7 +821,10 @@ def generate_pdf_report(
     )
     styles = _styles()
     story = []
-    report_date = datetime.now().strftime("%d-%m-%Y")
+    # tz-aware then converted to local time, so the printed date still
+    # matches the machine's local date (same behavior as before) rather
+    # than silently switching to UTC.
+    report_date = datetime.now(timezone.utc).astimezone().strftime("%d-%m-%Y")
 
     # ── Aggregate stats ──
     counts = {}

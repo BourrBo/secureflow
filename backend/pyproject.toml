@@ -1,0 +1,39 @@
+[tool.ruff.lint]
+# Explicit, narrow rule list — deliberately NOT whole categories like "E"
+# or "S", which pull in hundreds of unrelated checks (line-length,
+# raise-from-none, broad security lint) nobody's asked for yet. This is
+# exactly the set of rules this codebase has actually been fixed against
+# so far, pinned so CI and any local machine check the same things
+# regardless of what a given machine's global ruff config enables.
+select = [
+    "F",        # pyflakes: unused imports/vars, undefined names
+    "I",        # import sorting
+    "UP006",    # deprecated typing.List/Dict -> list/dict
+    "UP035",    # deprecated typing imports
+    "UP045",    # Optional[X] -> X | None
+    "BLE001",   # no bare `except Exception`
+    "S110",     # try/except/pass without logging
+    "B008",     # mutable-looking call in argument default (FastAPI false positive, tuned below)
+    "B018",     # useless expression
+    "PLW1510",  # subprocess.run without explicit check=
+    "DTZ005",   # datetime.now() without tz
+    "RUF013",   # implicit Optional
+    "RUF100",   # unused noqa directive
+]
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI's dependency-injection pattern relies on calling File()/Depends()/
+# Query()/Body() etc. directly in a parameter default — that's required,
+# idiomatic FastAPI, not the mutable-default-argument bug B008 exists to
+# catch. Tell ruff these specific calls are safe defaults instead of
+# rewriting every route signature to work around a false positive.
+extend-immutable-calls = [
+    "fastapi.Depends",
+    "fastapi.File",
+    "fastapi.Query",
+    "fastapi.Body",
+    "fastapi.Header",
+    "fastapi.Cookie",
+    "fastapi.Path",
+    "fastapi.Form",
+]

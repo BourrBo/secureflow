@@ -8,30 +8,33 @@ POST /api/reports/pdf
     table + Annex A control reference appendix).
 """
 
+import logging
+
 from fastapi import APIRouter, HTTPException, Response
-from typing import List, Optional
 from pydantic import BaseModel
 
 from models.finding import Finding
+from services.db_service import get_project, get_scan, list_findings, list_scans
 from services.report_service import generate_pdf_report
-from services.db_service import list_scans, get_scan, list_findings, get_project
 
 router = APIRouter()
 
+logger = logging.getLogger(__name__)
+
 
 class ReportRequest(BaseModel):
-    findings: List[Finding]
+    findings: list[Finding]
     scan_type: str = "all"          # "sast" | "sca" | "iac" | "secrets" | "all"
-    repo_label: Optional[str] = ""  # e.g. repo URL or uploaded file name, shown on the cover page
+    repo_label: str | None = ""  # e.g. repo URL or uploaded file name, shown on the cover page
 
     # VAPT "Closing Report" metadata — all optional, sensible defaults applied
-    client_name: Optional[str] = "Client"
-    client_contact: Optional[str] = ""
-    client_email: Optional[str] = ""
-    prepared_by: Optional[str] = "SecureFlow Automated Platform"
-    reviewed_by: Optional[str] = "SecureFlow Automated Platform"
-    released_by: Optional[str] = "SecureFlow Automated Platform"
-    doc_version: Optional[str] = "1.0"
+    client_name: str | None = "Client"
+    client_contact: str | None = ""
+    client_email: str | None = ""
+    prepared_by: str | None = "SecureFlow Automated Platform"
+    reviewed_by: str | None = "SecureFlow Automated Platform"
+    released_by: str | None = "SecureFlow Automated Platform"
+    doc_version: str | None = "1.0"
 
 
 @router.post("/api/reports/pdf")
@@ -51,7 +54,9 @@ def generate_report(request: ReportRequest):
             doc_version=request.doc_version or "1.0",
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        # can fail in many reportlab-internal ways; surface as a clean 500.
+        logger.exception("PDF report generation failed for scan_type=%s", request.scan_type)
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
     filename = f"secureflow_{request.scan_type}_vapt_report.pdf"
 
@@ -65,7 +70,7 @@ def generate_report(request: ReportRequest):
 # ── Phase 2 — list past scans, regenerate a PDF from stored findings ──
 
 @router.get("/api/reports")
-def get_reports(project_id: Optional[int] = None):
+def get_reports(project_id: int | None = None):
     """Lists every completed (report-able) scan, instead of only being able
     to generate a PDF on-the-fly right after a scan finishes."""
     scans = list_scans(project_id=project_id)
@@ -90,9 +95,12 @@ def regenerate_report(scan_id: int):
             repo_label=(project or {}).get("repo_url") or (project or {}).get("name", ""),
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        # can fail in many reportlab-internal ways; surface as a clean 500.
+        logger.exception("PDF report regeneration failed for scan_id=%s", scan_id)
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
     filename = f"secureflow_{scan['scan_type']}_scan{scan_id}_vapt_report.pdf"
+
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",

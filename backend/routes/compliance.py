@@ -7,7 +7,7 @@ at scan time via mappings/iso27001.py), so this is pure aggregation —
 no new mapping logic here.
 """
 
-from typing import Optional
+
 from fastapi import APIRouter, Query
 
 from services.db_service import get_compliance_summary
@@ -16,7 +16,7 @@ router = APIRouter(prefix="/api/compliance", tags=["compliance"])
 
 
 @router.get("")
-def get_compliance(project_id: Optional[int] = Query(default=None)):
+def get_compliance(project_id: int | None = Query(default=None)):
     controls = get_compliance_summary(project_id=project_id)
     total_findings = sum(c["total_findings"] for c in controls)
     return {

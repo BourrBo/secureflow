@@ -154,7 +154,7 @@ _SCANNER_DEFAULT_CONTROL = {
 _DEFAULT_CONTROL = "8.28"
 
 
-def get_iso_control(cwe: str = None, scanner: str = None) -> dict:
+def get_iso_control(cwe: str | None = None, scanner: str | None = None) -> dict:
     """
     Resolve the best-matching ISO/IEC 27001:2022 Annex A control for a
     finding, given its CWE (most specific) and/or scanner type (fallback).

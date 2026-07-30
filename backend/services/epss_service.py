@@ -1,10 +1,14 @@
+import logging
+
 try:
     from epss_api import EPSS
-except Exception:
+except ImportError:
     EPSS = None
 
+
 import requests
-from typing import Dict, List
+
+logger = logging.getLogger(__name__)
 
 # --------------------------------------------------------------------
 # Configuration
@@ -16,10 +20,10 @@ _http_endpoint = "https://api.first.org/data/v1/epss"
 _client = EPSS() if EPSS is not None else None
 
 # Simple in-memory cache
-_cache: Dict[str, dict] = {}
+_cache: dict[str, dict] = {}
 
 
-def get_epss_scores(cve_ids: List[str]) -> Dict[str, dict]:
+def get_epss_scores(cve_ids: list[str]) -> dict[str, dict]:
     """
     Fetch EPSS scores for multiple CVEs.
 
@@ -39,7 +43,7 @@ def get_epss_scores(cve_ids: List[str]) -> Dict[str, dict]:
     - No API key required
     """
 
-    result: Dict[str, dict] = {}
+    result: dict[str, dict] = {}
 
     # ------------------------------------------------------------
     # Clean input
@@ -91,9 +95,10 @@ def get_epss_scores(cve_ids: List[str]) -> Dict[str, dict]:
 
             return result
 
-        except Exception:
-            # Fallback to HTTP API
-            pass
+        except Exception as exc:  # noqa: BLE001 — epss_api has no documented
+            # exception hierarchy; any failure here should fall back to the
+            # HTTP API rather than break the caller.
+            logger.debug("EPSS library lookup failed, falling back to HTTP API: %s", exc)
 
     # ------------------------------------------------------------
     # Method 2: FIRST.org Batch HTTP API
@@ -122,7 +127,7 @@ def get_epss_scores(cve_ids: List[str]) -> Dict[str, dict]:
 
             try:
                 score = float(item.get("epss", 0))
-            except Exception:
+            except (TypeError, ValueError):
                 score = 0.0
 
             info = {
@@ -134,9 +139,11 @@ def get_epss_scores(cve_ids: List[str]) -> Dict[str, dict]:
             result[cve] = info
             _cache[cve] = info
 
-    except Exception:
-        # EPSS unavailable
-        pass
+    except (requests.RequestException, ValueError) as exc:
+        # requests.RequestException: network/HTTP failure.
+        # ValueError: response.json() failed to parse.
+        # EPSS is a best-effort enrichment — don't fail the scan over it.
+        logger.debug("EPSS HTTP API unavailable: %s", exc)
 
     return result
 

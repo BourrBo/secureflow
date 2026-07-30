@@ -29,7 +29,6 @@ import os
 import shutil
 import subprocess
 import time
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +81,7 @@ def get_zap_config() -> dict:
     }
 
 
-def _find_zap_executable() -> Optional[str]:
+def _find_zap_executable() -> str | None:
     """Best-effort discovery of zap.bat. Returns None if not found — callers
     must handle that (it just means auto-start, if enabled, has nothing to
     launch; connect-only mode doesn't need this at all)."""
@@ -97,16 +96,18 @@ def _find_zap_executable() -> Optional[str]:
     return None
 
 
-def is_zap_reachable(zap_client) -> Optional[str]:
+def is_zap_reachable(zap_client) -> str | None:
     """Checks whether we can get ZAP's version over the API right now.
     Returns None if reachable, or the underlying exception message as a
     string if not — callers get an actual reason to log/surface instead of
     a bare True/False, which is what made the original failure hard to
     diagnose."""
     try:
-        zap_client.core.version
+        _ = zap_client.core.version  # property access is the actual probe; the value itself is unused
         return None
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — this function's entire job is
+        # to catch anything (connection errors, timeouts, auth failures,
+        # malformed responses) and hand back a reason instead of raising.
         return str(exc)
 
 

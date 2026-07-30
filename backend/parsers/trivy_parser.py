@@ -1,6 +1,6 @@
 from mappings.iso27001 import get_iso_control
-from utils.severity import normalize_severity
 from services.epss_service import get_epss_scores
+from utils.severity import normalize_severity
 
 
 def _extract_cvss_score(vuln):

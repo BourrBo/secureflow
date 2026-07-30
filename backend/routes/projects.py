@@ -9,10 +9,10 @@ router only reads and optionally deletes them.
 from fastapi import APIRouter, HTTPException
 
 from services.db_service import (
-    list_projects,
+    delete_project,
     get_project,
     get_scans_for_project,
-    delete_project,
+    list_projects,
 )
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])

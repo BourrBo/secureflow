@@ -5,10 +5,9 @@ the shared `Finding` shape used across SAST/SCA/IaC, so the frontend can
 treat all four scanners uniformly via the `scanner` field.
 """
 
-from secret_detection.scanner import ScanResult
 from mappings.iso27001 import get_iso_control
+from secret_detection.scanner import ScanResult
 from utils.severity import normalize_severity
-
 
 # Secret detection findings don't map to a single CWE — leave the mapping
 # loose but still meaningful where it clearly applies.

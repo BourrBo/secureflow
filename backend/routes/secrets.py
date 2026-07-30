@@ -11,31 +11,32 @@ with scanner="secrets", so the frontend can filter/merge findings from all
 four scanners identically.
 """
 
-from fastapi import APIRouter, HTTPException, UploadFile, File
-from typing import List
+import logging
+
+from fastapi import APIRouter, File, HTTPException, UploadFile
 
 from models.finding import Finding
 from models.scan_request import ScanRequest
-
-from secret_detection.scanner import scan_directory_for_secrets
 from parsers.secrets_parser import normalize_secret_findings
-
-from services.git_service import clone_repo, cleanup_repo
-from services.upload_service import save_and_extract_zip, cleanup_upload
+from secret_detection.scanner import scan_directory_for_secrets
 from services.db_service import (
-    get_or_create_project,
-    derive_project_name_from_repo_url,
     create_scan,
+    derive_project_name_from_repo_url,
     finish_scan,
+    get_or_create_project,
     insert_findings,
 )
+from services.git_service import cleanup_repo, clone_repo
+from services.upload_service import cleanup_upload, save_and_extract_zip
 
 router = APIRouter()
+
+logger = logging.getLogger(__name__)
 
 
 @router.post(
     "/api/secrets/scan",
-    response_model=List[Finding]
+    response_model=list[Finding]
 )
 def scan_secrets(request: ScanRequest):
     repo_path = None
@@ -55,8 +56,10 @@ def scan_secrets(request: ScanRequest):
         finish_scan(scan_id, "completed")
         return findings
     except Exception as e:
+        # must still mark the scan failed and return a clean 500.
+        logger.exception("Secrets scan failed for %s", request.repo_url)
         finish_scan(scan_id, "failed")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
     finally:
         if repo_path:
             cleanup_repo(repo_path)
@@ -64,7 +67,7 @@ def scan_secrets(request: ScanRequest):
 
 @router.post(
     "/api/secrets/scan-local",
-    response_model=List[Finding]
+    response_model=list[Finding]
 )
 def scan_secrets_local(file: UploadFile = File(...)):
     extract_path = None
@@ -83,8 +86,10 @@ def scan_secrets_local(file: UploadFile = File(...)):
         finish_scan(scan_id, "completed")
         return findings
     except Exception as e:
+        # must still mark the scan failed and return a clean 500.
+        logger.exception("Secrets local scan failed for %s", file.filename)
         finish_scan(scan_id, "failed")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
     finally:
         if extract_path:
             cleanup_upload(extract_path)

@@ -11,7 +11,6 @@ import math
 import re
 from collections import Counter
 from dataclasses import dataclass
-from typing import List
 
 # Roughly matches "token-shaped" substrings: long runs of alnum/symbols, no spaces.
 CANDIDATE_TOKEN_REGEX = re.compile(r"[A-Za-z0-9+/=_\-]{20,}")
@@ -41,7 +40,7 @@ def find_high_entropy_tokens(
     line: str,
     threshold: float = 3.5,
     min_length: int = 20,
-) -> List[EntropyFinding]:
+) -> list[EntropyFinding]:
     """
     Scans a single line for high-entropy substrings.
     threshold: bits/char above which we treat it as "random enough" to flag.
@@ -49,7 +48,7 @@ def find_high_entropy_tokens(
       ~3.0-4.5 depending on charset; we use a slightly conservative default
       to limit noise).
     """
-    findings: List[EntropyFinding] = []
+    findings: list[EntropyFinding] = []
 
     for match in CANDIDATE_TOKEN_REGEX.finditer(line):
         token = match.group(0)

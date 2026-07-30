@@ -7,9 +7,9 @@ Re-normalizes every row's `severity` in place, without re-running any scans.
 Run once from the backend/ folder:
     python scripts/backfill_severity.py
 """
+import os
 import sqlite3
 import sys
-import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 

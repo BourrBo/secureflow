@@ -1,10 +1,10 @@
 import json
 import shutil
+
 import pytest
 
-from scanners.container_runner import run_container_scan
 from parsers.container_parser import normalize_container_findings
-
+from scanners.container_runner import run_container_scan
 
 if shutil.which("trivy") is None:
 	pytest.skip("Trivy not available in PATH; skipping container scan script", allow_module_level=True)

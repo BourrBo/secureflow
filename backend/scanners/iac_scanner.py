@@ -4,6 +4,7 @@ import shutil
 import subprocess
 import sys
 
+
 def run_iac_scan(repo_path: str) -> dict:
     """
     Runs Checkov on the given path and returns raw JSON results.
@@ -30,7 +31,8 @@ def run_iac_scan(repo_path: str) -> dict:
         capture_output=True,
         text=True,
         encoding="utf-8",
-        errors="ignore"
+        errors="ignore",
+        check=False,  # returncode is checked manually below, with our own error message
     )
 
     if result.returncode not in (0, 1):

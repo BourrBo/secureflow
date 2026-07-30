@@ -1,7 +1,8 @@
 # scanners/semgrep_runner.py
 
-import subprocess
 import json
+import subprocess
+
 
 def run_semgrep(repo_path: str):
 
@@ -16,7 +17,8 @@ def run_semgrep(repo_path: str):
         capture_output=True,
         text=True,
         encoding="utf-8",
-        errors="ignore"
+        errors="ignore",
+        check=False,  # returncode is checked manually below, with our own error message
     )
 
     if not result.stdout:

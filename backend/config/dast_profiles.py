@@ -1,5 +1,5 @@
-from typing import Dict
-SCAN_PROFILES: Dict[str, dict] = {
+
+SCAN_PROFILES: dict[str, dict] = {
     "quick": {
         "name": "Quick Scan",
         "description": (

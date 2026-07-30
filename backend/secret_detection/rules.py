@@ -9,7 +9,7 @@ NOTE: Pattern-based, deterministic checks only — no external API calls.
 import re
 from dataclasses import dataclass
 from enum import Enum
-from typing import List, Pattern
+from re import Pattern
 
 
 class Severity(str, Enum):
@@ -27,7 +27,7 @@ class SecretRule:
     severity: Severity
 
 
-SECRET_RULES: List[SecretRule] = [
+SECRET_RULES: list[SecretRule] = [
     SecretRule(
         id="aws-access-key",
         description="AWS Access Key ID",
@@ -127,7 +127,7 @@ SECRET_RULES: List[SecretRule] = [
 ALLOWLIST_MARKER = "secureflow:allow"
 
 # Paths/extensions we never want to scan.
-DEFAULT_IGNORE_PATTERNS: List[Pattern] = [
+DEFAULT_IGNORE_PATTERNS: list[Pattern] = [
     re.compile(r"node_modules/"),
     re.compile(r"\.git/"),
     re.compile(r"\.next/"),

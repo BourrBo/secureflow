@@ -13,7 +13,6 @@ fields if absolutely necessary" constraint, and because these are
 supplementary context rather than data other modules need to query on.
 """
 
-from typing import List
 
 from mappings.iso27001 import get_iso_control
 
@@ -96,7 +95,7 @@ def _build_description(alert: dict) -> str:
     return "\n\n".join(parts) if parts else "No description available."
 
 
-def normalize_zap_findings(alerts: List[dict]) -> List[dict]:
+def normalize_zap_findings(alerts: list[dict]) -> list[dict]:
     """
     Normalize a list of raw ZAP alert dicts into SecureFlow's shared finding
     shape (matches models.finding.Finding and the other scanner parsers).

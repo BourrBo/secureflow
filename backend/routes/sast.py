@@ -1,38 +1,33 @@
-from fastapi import UploadFile, File
-from services.upload_service import save_and_extract_zip, cleanup_upload
+import logging
 
-from fastapi import APIRouter, HTTPException
-from typing import List
+from fastapi import APIRouter, File, HTTPException, UploadFile
 
 from models.finding import Finding
 from models.scan_request import ScanRequest
-
-from scanners.semgrep_runner import run_semgrep
-from scanners.trivy_runner import run_trivy
-from scanners.iac_scanner import run_iac_scan
-
+from parsers.iac_parser import normalize_iac_findings
 from parsers.semgrep_parser import normalize_findings
 from parsers.trivy_parser import normalize_trivy_findings
-from parsers.iac_parser import normalize_iac_findings
-
-from services.git_service import (
-    clone_repo,
-    cleanup_repo
-)
+from scanners.iac_scanner import run_iac_scan
+from scanners.semgrep_runner import run_semgrep
+from scanners.trivy_runner import run_trivy
 from services.db_service import (
-    get_or_create_project,
-    derive_project_name_from_repo_url,
     create_scan,
+    derive_project_name_from_repo_url,
     finish_scan,
+    get_or_create_project,
     insert_findings,
 )
+from services.git_service import cleanup_repo, clone_repo
+from services.upload_service import cleanup_upload, save_and_extract_zip
 
 router = APIRouter()
+
+logger = logging.getLogger(__name__)
 
 
 @router.post(
     "/api/sast/scan",
-    response_model=List[Finding]
+    response_model=list[Finding]
 )
 def scan(request: ScanRequest):
 
@@ -65,6 +60,10 @@ def scan(request: ScanRequest):
         return semgrep_findings + trivy_findings
 
     except Exception as e:
+        # failure anywhere in this pipeline must still mark both scans
+        # failed and return a clean 500 instead of a raw traceback.
+
+        logger.exception("SAST/SCA scan failed for %s", request.repo_url)
 
         finish_scan(sast_scan_id, "failed")
         finish_scan(sca_scan_id, "failed")
@@ -72,7 +71,7 @@ def scan(request: ScanRequest):
         raise HTTPException(
             status_code=500,
             detail=str(e)
-        )
+        ) from e
 
     finally:
 
@@ -82,7 +81,7 @@ def scan(request: ScanRequest):
 
 @router.post(
     "/api/sast/scan-local",
-    response_model=List[Finding]
+    response_model=list[Finding]
 )
 def scan_local(file: UploadFile = File(...)):
     extract_path = None
@@ -112,12 +111,15 @@ def scan_local(file: UploadFile = File(...)):
 
         return semgrep_findings + trivy_findings
     except Exception as e:
+        # failure anywhere in this pipeline must still mark both scans
+        # failed and return a clean 500 instead of a raw traceback.
+        logger.exception("SAST/SCA local scan failed for %s", file.filename)
         finish_scan(sast_scan_id, "failed")
         finish_scan(sca_scan_id, "failed")
         raise HTTPException(
             status_code=500,
             detail=str(e)
-        )
+        ) from e
     finally:
         if extract_path:
             cleanup_upload(extract_path)
@@ -126,7 +128,7 @@ def scan_local(file: UploadFile = File(...)):
 # ── IaC: scan from GitHub URL ──────────────────────────────────────
 @router.post(
     "/api/iac/scan",
-    response_model=List[Finding]
+    response_model=list[Finding]
 )
 def scan_iac(request: ScanRequest):
     repo_path = None
@@ -146,8 +148,10 @@ def scan_iac(request: ScanRequest):
         finish_scan(scan_id, "completed")
         return findings
     except Exception as e:
+        # must still mark the scan failed and return a clean 500.
+        logger.exception("IaC scan failed for %s", request.repo_url)
         finish_scan(scan_id, "failed")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
     finally:
         if repo_path:
             cleanup_repo(repo_path)
@@ -156,7 +160,7 @@ def scan_iac(request: ScanRequest):
 # ── IaC: scan from uploaded zip ────────────────────────────────────
 @router.post(
     "/api/iac/scan-local",
-    response_model=List[Finding]
+    response_model=list[Finding]
 )
 def scan_iac_local(file: UploadFile = File(...)):
     extract_path = None
@@ -175,8 +179,10 @@ def scan_iac_local(file: UploadFile = File(...)):
         finish_scan(scan_id, "completed")
         return findings
     except Exception as e:
+        # must still mark the scan failed and return a clean 500.
+        logger.exception("IaC local scan failed for %s", file.filename)
         finish_scan(scan_id, "failed")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
     finally:
         if extract_path:
             cleanup_upload(extract_path)
