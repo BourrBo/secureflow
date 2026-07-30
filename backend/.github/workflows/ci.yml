@@ -1,0 +1,49 @@
+name: CI
+
+# Runs lint/test checks on every PR and on pushes to main.
+# No deployment step — this is checks-only CI.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend (FastAPI)
+    runs-on: ubuntu-latest
+    # If this workflow lives in the backend's own repo root, delete the
+    # `defaults` block below. Keep it only if backend/ is a subfolder.
+    # defaults:
+    #   run:
+    #     working-directory: backend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install ruff pytest
+
+      - name: Lint (ruff)
+        run: ruff check .
+
+      - name: Run tests (pytest)
+        env:
+          JWT_SECRET: ci-test-secret-do-not-use-in-prod
+        run: pytest -v
