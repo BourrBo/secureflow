@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Scan artifacts / scratch
+tmp_scans/
+test_repo.zip
+*.zip
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
