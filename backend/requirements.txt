@@ -5,8 +5,11 @@ gitpython
 reportlab
 python-multipart
 passlib[bcrypt]
+bcrypt==4.0.1
 PyJWT
 google-auth
+requests
 semgrep
 checkov
 epss-api
+python-dotenv

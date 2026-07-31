@@ -118,6 +118,22 @@ def init_db():
         conn.execute("CREATE INDEX IF NOT EXISTS idx_scans_project ON scans(project_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_findings_scan ON findings(scan_id)")
 
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                email          TEXT NOT NULL UNIQUE,
+                password_hash  TEXT,
+                first_name     TEXT,
+                last_name      TEXT,
+                avatar_url     TEXT,
+                auth_provider  TEXT NOT NULL DEFAULT 'local' CHECK(
+                                   auth_provider IN ('local', 'google')
+                               ),
+                created_at     TEXT NOT NULL
+            )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)")
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -454,3 +470,69 @@ def get_findings_trend(days: int = 7) -> list[dict]:
             (f"-{days} days",),
         ).fetchall()
         return [dict(r) for r in rows]
+
+
+# ── Users ─────────────────────────────────────────────────────────
+
+def _user_row_to_dict(row) -> dict:
+    return {
+        "id": row["id"],
+        "email": row["email"],
+        "password_hash": row["password_hash"],
+        "first_name": row["first_name"],
+        "last_name": row["last_name"],
+        "avatar_url": row["avatar_url"],
+        "auth_provider": row["auth_provider"],
+        "created_at": row["created_at"],
+    }
+
+
+def get_user_by_email(email: str) -> dict | None:
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT * FROM users WHERE email = ?",
+            (email.lower().strip(),),
+        ).fetchone()
+        return _user_row_to_dict(row) if row else None
+
+
+def get_user_by_id(user_id: int) -> dict | None:
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT * FROM users WHERE id = ?",
+            (user_id,),
+        ).fetchone()
+        return _user_row_to_dict(row) if row else None
+
+
+def create_user(
+    email: str,
+    first_name: str | None = None,
+    last_name: str | None = None,
+    password_hash: str | None = None,
+    avatar_url: str | None = None,
+    auth_provider: str = "local",
+) -> dict:
+    """Raises sqlite3.IntegrityError if the email is already registered —
+    callers (routes/auth.py) are expected to catch that and return a clean
+    409/400 instead of letting it become an unhandled 500."""
+    with get_db() as conn:
+        cur = conn.execute(
+            """
+            INSERT INTO users (email, password_hash, first_name, last_name,
+                                avatar_url, auth_provider, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                email.lower().strip(),
+                password_hash,
+                first_name,
+                last_name,
+                avatar_url,
+                auth_provider,
+                _now(),
+            ),
+        )
+        user_id = cur.lastrowid
+
+    return get_user_by_id(user_id)

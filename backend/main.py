@@ -1,8 +1,10 @@
 import logging
 
+from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from routes.auth import router as auth_router
 from routes.compliance import router as compliance_router
 from routes.container import router as container_router
 from routes.dast import router as dast_router
@@ -12,6 +14,8 @@ from routes.reports import router as reports_router
 from routes.sast import router as sast_router
 from routes.secrets import router as secrets_router
 from services.db_service import init_db
+
+load_dotenv()
 
 logging.basicConfig(
     level=logging.INFO,
@@ -45,6 +49,7 @@ app.add_middleware(
 )
 
 # Routes
+app.include_router(auth_router)
 app.include_router(sast_router)
 app.include_router(secrets_router)
 app.include_router(reports_router)
