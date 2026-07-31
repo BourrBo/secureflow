@@ -1,16 +1,20 @@
 """
 routes/findings.py
 
-Phase 2 — read-only view over the findings already persisted by Phase 1.
-No new scanning logic; this is a query endpoint over the `findings` table.
+Read-only view over the findings persisted by the scan endpoints, plus a
+DELETE action to clear accumulated findings once they're no longer needed
+(without deleting scan/project history).
 """
 
+import logging
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
 
-from services.db_service import list_findings
+from services.db_service import delete_all_findings, list_findings
 
 router = APIRouter(prefix="/api/findings", tags=["findings"])
+
+logger = logging.getLogger(__name__)
 
 
 @router.get("")
@@ -19,11 +23,33 @@ def get_findings(
     scan_id: int | None = Query(default=None),
     severity: str | None = Query(default=None, description="CRITICAL/HIGH/MEDIUM/LOW"),
     scanner: str | None = Query(default=None, description="semgrep/trivy/checkov/secrets"),
+    limit: int | None = Query(default=None, description="Cap the number of rows returned, most recent first. Omit for no limit."),
 ):
-    findings = list_findings(
+    findings, total = list_findings(
         project_id=project_id,
         scan_id=scan_id,
         severity=severity,
         scanner=scanner,
+        limit=limit,
     )
-    return {"count": len(findings), "findings": findings}
+    return {"count": len(findings), "total": total, "findings": findings}
+
+
+@router.delete("")
+def clear_findings(
+    project_id: int | None = Query(default=None, description="Only clear findings for this project"),
+    scanner: str | None = Query(default=None, description="Only clear findings from this scanner"),
+):
+    """Deletes findings rows so the dashboard doesn't keep growing unbounded
+    across repeated test scans. Scan/project history is left intact —
+    only the individual finding rows are removed."""
+    try:
+        deleted = delete_all_findings(project_id=project_id, scanner=scanner)
+    except Exception as exc:
+        # Route boundary: surface as a clean 500 rather than a raw
+        # traceback for a destructive action.
+        logger.exception("Failed to clear findings")
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    logger.info("Cleared %d findings (project_id=%s, scanner=%s)", deleted, project_id, scanner)
+    return {"deleted": deleted}

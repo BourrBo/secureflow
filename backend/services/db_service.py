@@ -372,15 +372,12 @@ def list_findings(
     scan_id: int | None = None,
     severity: str | None = None,
     scanner: str | None = None,
-) -> list[dict]:
+    limit: int | None = None,
+) -> tuple[list[dict], int]:
     """Findings joined back to their scan/project, with optional filters.
-    Powers GET /api/findings."""
-    query = """
-        SELECT
-            f.*,
-            s.scan_type   AS scan_type,
-            s.project_id  AS project_id,
-            p.name        AS project_name
+    Powers GET /api/findings. Returns (findings, total_count) -- total_count
+    ignores `limit` so the caller can show "showing N of TOTAL"."""
+    base_query = """
         FROM findings f
         JOIN scans s    ON s.id = f.scan_id
         JOIN projects p ON p.id = s.project_id
@@ -389,23 +386,48 @@ def list_findings(
     params: list = []
 
     if project_id is not None:
-        query += " AND s.project_id = ?"
+        base_query += " AND s.project_id = ?"
         params.append(project_id)
     if scan_id is not None:
-        query += " AND f.scan_id = ?"
+        base_query += " AND f.scan_id = ?"
         params.append(scan_id)
     if severity is not None:
-        query += " AND f.severity = ?"
+        base_query += " AND f.severity = ?"
         params.append(severity.upper())
     if scanner is not None:
-        query += " AND f.scanner = ?"
+        base_query += " AND f.scanner = ?"
         params.append(scanner)
 
-    query += " ORDER BY f.id DESC"
+    with get_db() as conn:
+        total = conn.execute(f"SELECT COUNT(*) {base_query}", params).fetchone()[0]
+
+        select_query = f"SELECT f.*, s.scan_type AS scan_type, s.project_id AS project_id, p.name AS project_name {base_query} ORDER BY f.id DESC"
+        if limit is not None:
+            select_query += " LIMIT ?"
+            params = [*params, limit]
+
+        rows = conn.execute(select_query, params).fetchall()
+        return [_row_to_finding_dict(r) for r in rows], total
+
+
+def delete_all_findings(project_id: int | None = None, scanner: str | None = None) -> int:
+    """Deletes findings rows (optionally scoped to a project/scanner),
+    leaving scans/projects records intact. Returns the number deleted.
+    Used by the "clear findings" action to keep the DB from growing
+    unbounded across repeated test scans."""
+    query = "DELETE FROM findings WHERE 1=1"
+    params: list = []
+
+    if project_id is not None:
+        query += " AND scan_id IN (SELECT id FROM scans WHERE project_id = ?)"
+        params.append(project_id)
+    if scanner is not None:
+        query += " AND scanner = ?"
+        params.append(scanner)
 
     with get_db() as conn:
-        rows = conn.execute(query, params).fetchall()
-        return [_row_to_finding_dict(r) for r in rows]
+        cur = conn.execute(query, params)
+        return cur.rowcount
 
 
 # ── Compliance ──────────────────────────────────────────────────────

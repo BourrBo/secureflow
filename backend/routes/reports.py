@@ -86,7 +86,7 @@ def regenerate_report(scan_id: int):
         raise HTTPException(status_code=404, detail="Scan not found")
 
     project = get_project(scan["project_id"])
-    findings = list_findings(scan_id=scan_id)
+    findings, _total = list_findings(scan_id=scan_id)
 
     try:
         pdf_bytes = generate_pdf_report(

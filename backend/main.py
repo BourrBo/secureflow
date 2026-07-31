@@ -42,6 +42,7 @@ app.add_middleware(
         "http://localhost:8080",
         "http://192.168.1.4:8080",
         "https://id-preview--3418111a-32b7-4c0f-8a4f-6ea92ef21a06.lovable.app",
+        "https://secureflow-laati.lovable.app",
     ],
     allow_credentials=True,
     allow_methods=["*"],
