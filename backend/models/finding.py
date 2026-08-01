@@ -44,3 +44,10 @@ class Finding(BaseModel):
     additional_observations: str | None = None
     revalidation_status: str = "Open"                # "Open" | "Closed" | "Accepted Risk"
     new_or_repeat: str = "New"                        # "New" | "Repeat"
+
+    # Unified priority (see services/priority_service.py) -- EPSS-based for
+    # CVE-bearing findings (SCA/Container), CWE-Top-25-weighted otherwise
+    # (SAST/IaC/Secrets/DAST), always on the same 0-100 scale.
+    priority_score: float | None = None
+    priority_basis: str | None = None              # "EPSS" | "CWE-Weighted"
+    priority_risk_level: str | None = None          # CRITICAL | HIGH | MEDIUM | LOW

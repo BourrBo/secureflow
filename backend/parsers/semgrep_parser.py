@@ -1,6 +1,7 @@
 import logging
 
 from mappings.iso27001 import get_iso_control
+from services.priority_service import compute_cwe_priority
 from utils.severity import normalize_severity
 
 logger = logging.getLogger(__name__)
@@ -9,7 +10,7 @@ logger = logging.getLogger(__name__)
 def get_code_context(filepath: str, start_line: int, end_line: int, context: int = 2):
     """Read a few lines of real source around the finding, for display in the UI."""
     try:
-        with open(filepath, encoding="utf-8", errors="ignore") as f:
+        with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
             lines = f.readlines()
 
         start = max(0, start_line - 1 - context)
@@ -46,10 +47,17 @@ def normalize_findings(data):
         end_line = result["end"]["line"]
 
         iso = get_iso_control(cwe=cwe, scanner="semgrep")
+        severity = normalize_severity(result["extra"]["severity"], scanner="semgrep")
+
+        # Semgrep registry rules often carry a confidence rating in
+        # metadata; use it when present to sharpen the priority score.
+        confidence = metadata.get("confidence")
+
+        priority = compute_cwe_priority(severity=severity, cwe=cwe, confidence=confidence)
 
         findings.append({
             "title": result["check_id"].split(".")[-1],
-            "severity": normalize_severity(result["extra"]["severity"], scanner="semgrep"),
+            "severity": severity,
             "file": result["path"],
             "line": start_line,
             "description": result["extra"]["message"],
@@ -67,6 +75,7 @@ def normalize_findings(data):
             "iso27001_control_name": iso["name"],
             "iso27001_description": iso["description"],
             "code_context": get_code_context(result["path"], start_line, end_line),
+            **priority,
         })
 
     return findings

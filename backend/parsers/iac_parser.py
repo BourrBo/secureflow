@@ -1,4 +1,5 @@
 from mappings.iso27001 import get_iso_control
+from services.priority_service import compute_cwe_priority
 from utils.severity import normalize_severity
 
 
@@ -27,10 +28,12 @@ def normalize_iac_findings(data: dict) -> list:
             line = line_range[0] if line_range else 0
 
             iso = get_iso_control(cwe="CWE-732", scanner="checkov")
+            severity = normalize_severity(check.get("severity"), scanner="checkov")
+            priority = compute_cwe_priority(severity=severity, cwe="CWE-732")
 
             findings.append({
                 "title":       check.get("check_id", "UNKNOWN"),
-                "severity":    normalize_severity(check.get("severity"), scanner="checkov"),
+                "severity":    severity,
                 "file":        file_path,
                 "line":        line,
                 "description": check.get("check_result", {}).get("result", "FAILED")
@@ -48,6 +51,7 @@ def normalize_iac_findings(data: dict) -> list:
                 "iso27001_control": iso["id"],
                 "iso27001_control_name": iso["name"],
                 "iso27001_description": iso["description"],
+                **priority,
             })
 
     return findings

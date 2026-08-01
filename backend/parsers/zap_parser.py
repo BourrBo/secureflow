@@ -15,6 +15,7 @@ supplementary context rather than data other modules need to query on.
 
 
 from mappings.iso27001 import get_iso_control
+from services.priority_service import compute_cwe_priority
 
 # ZAP's native risk vocabulary -> SecureFlow's canonical severity scale.
 # (utils/severity.py's normalize_severity() doesn't have a ZAP branch, and
@@ -105,10 +106,15 @@ def normalize_zap_findings(alerts: list[dict]) -> list[dict]:
     for alert in alerts or []:
         cwe = _format_cwe(alert.get("cweid"))
         iso = get_iso_control(cwe=cwe, scanner="dast")
+        severity = _normalize_zap_severity(alert.get("risk"))
+        # ZAP already rates its own confidence in each alert
+        # (High/Medium/Low) -- reuse it for the priority score.
+        confidence = alert.get("confidence")
+        priority = compute_cwe_priority(severity=severity, cwe=cwe, confidence=confidence)
 
         findings.append({
             "title": alert.get("alert") or alert.get("name") or "Unknown DAST Finding",
-            "severity": _normalize_zap_severity(alert.get("risk")),
+            "severity": severity,
             # No source file for a runtime finding — the affected URL is the
             # closest equivalent, so it goes in the `file` field the same
             # way container findings put the image name there.
@@ -128,6 +134,7 @@ def normalize_zap_findings(alerts: list[dict]) -> list[dict]:
             "fixed_version": None,
             "cvss": None,
             "ecosystem": None,
+            **priority,
         })
 
     return findings

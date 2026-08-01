@@ -1,5 +1,6 @@
 from mappings.iso27001 import get_iso_control
 from services.epss_service import get_epss_scores
+from services.priority_service import compute_epss_priority
 from utils.severity import normalize_severity
 
 
@@ -89,5 +90,8 @@ def normalize_trivy_findings(data):
                 finding["epss_score"] = epss[cve]["score"]
                 finding["epss_percentile"] = epss[cve]["percentile"]
                 finding["epss_risk_level"] = epss[cve]["risk_level"]
+
+    for finding in findings:
+        finding.update(compute_epss_priority(finding["epss_score"]))
 
     return findings

@@ -7,6 +7,7 @@ treat all four scanners uniformly via the `scanner` field.
 
 from mappings.iso27001 import get_iso_control
 from secret_detection.scanner import ScanResult
+from services.priority_service import compute_cwe_priority
 from utils.severity import normalize_severity
 
 # Secret detection findings don't map to a single CWE — leave the mapping
@@ -35,10 +36,16 @@ def normalize_secret_findings(result: ScanResult):
     for f in result.findings:
         cwe = _CWE_BY_RULE.get(f.rule_id, "CWE-798")
         iso = get_iso_control(cwe=cwe, scanner="secrets")
+        severity = normalize_severity(f.severity.value, scanner="secrets")
+        # Entropy-based matches are inherently less certain than a known
+        # pattern (an AWS key regex) -- feed that into the priority score
+        # as a confidence signal rather than treating every hit the same.
+        confidence = "LOW" if f.rule_id == "entropy-generic" else "HIGH"
+        priority = compute_cwe_priority(severity=severity, cwe=cwe, confidence=confidence)
 
         findings.append({
             "title": f.rule_id,
-            "severity": normalize_severity(f.severity.value, scanner="secrets"),
+            "severity": severity,
             "file": f.file_path,
             "line": f.line,
             "description": f.description + f" (matched: {f.match})",
@@ -49,6 +56,7 @@ def normalize_secret_findings(result: ScanResult):
             "iso27001_control": iso["id"],
             "iso27001_control_name": iso["name"],
             "iso27001_description": iso["description"],
+            **priority,
         })
 
     return findings
