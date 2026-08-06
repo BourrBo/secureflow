@@ -1,4 +1,3 @@
-
 import logging
 import time
 
@@ -258,6 +257,32 @@ def run_zap_scan(
     )
 
     logger.info("STEP 5",  )
+
+    # ZAP runs as a long-lived daemon (autostart only launches it once; it
+    # keeps running across every scan you trigger afterwards). Without an
+    # explicit new session here, every scan's spider/active-scan results and
+    # the site tree accumulate forever in the SAME ZAP session — so scan #2
+    # inherits everything ZAP already learned in scan #1, the spider finds
+    # "nothing new" and finishes in seconds, the active scan has almost
+    # nothing queued, and zap.core.alerts(baseurl=...) below only returns the
+    # slice of that shared, cross-contaminated session matching the exact
+    # target_url string. Clearing findings in the SecureFlow dashboard does
+    # NOT touch this — that only clears our own DB, not ZAP's internal state.
+    # Starting a fresh, named session per scan makes every run independent
+    # and reproducible, the way scan_id-scoped results should be.
+    try:
+        session_name = f"secureflow-scan-{int(time.time())}"
+        zap.core.new_session(name=session_name, overwrite=True)
+        logger.info("Started fresh ZAP session '%s' for this scan", session_name)
+    except Exception as exc:  # noqa: BLE001 — if the running ZAP instance
+        # can't create a new session (e.g. an older API), don't hard-fail the
+        # whole scan over it — but make the risk visible in the logs instead
+        # of silently scanning against whatever session already exists.
+        logger.warning(
+            "Could not start a fresh ZAP session (%s) — this scan may reuse "
+            "state from a previous scan in the same ZAP instance.",
+            exc,
+        )
 
     try:
         logger.info("STEP 6",  )

@@ -1,11 +1,12 @@
 import logging
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
 from models.container_request import ContainerScanRequest
 from models.finding import Finding
 from parsers.container_parser import normalize_container_findings
 from scanners.container_runner import run_container_scan
+from services.auth_service import get_current_user_id
 from services.db_service import (
     create_scan,
     finish_scan,
@@ -22,7 +23,7 @@ logger = logging.getLogger(__name__)
     "/api/container/scan",
     response_model=list[Finding],
 )
-def scan_container(request: ContainerScanRequest):
+def scan_container(request: ContainerScanRequest, user_id: str = Depends(get_current_user_id)):
     """
     Scan a container image with Trivy and persist the results, following
     the same project/scan/findings pattern used by the SAST/SCA/IaC routes.
@@ -34,18 +35,19 @@ def scan_container(request: ContainerScanRequest):
     """
 
     project_id = get_or_create_project(
+        user_id,
         name=request.image_name,
         source_type="upload",
     )
-    scan_id = create_scan(project_id, "container")
+    scan_id = create_scan(user_id, project_id, "container")
 
     try:
         raw_results = run_container_scan(request.image_name)
 
         findings = normalize_container_findings(raw_results)
 
-        insert_findings(scan_id, findings)
-        finish_scan(scan_id, "completed")
+        insert_findings(user_id, scan_id, project_id, findings)
+        finish_scan(user_id, scan_id, "completed")
 
         return findings
 
@@ -54,7 +56,7 @@ def scan_container(request: ContainerScanRequest):
         # a raw traceback.
         logger.exception("Container scan failed for %s", request.image_name)
 
-        finish_scan(scan_id, "failed")
+        finish_scan(user_id, scan_id, "failed")
 
         raise HTTPException(
             status_code=500,

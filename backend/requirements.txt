@@ -4,10 +4,8 @@ pydantic
 gitpython
 reportlab
 python-multipart
-passlib[bcrypt]
-bcrypt==4.0.1
-PyJWT
-google-auth
+httpx
+psycopg2-binary
 requests
 semgrep
 checkov

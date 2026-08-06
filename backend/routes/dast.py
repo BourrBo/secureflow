@@ -1,70 +1,56 @@
 import logging
+import threading
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
 from models.dast_request import DastScanRequest
-from models.finding import Finding
 from parsers.zap_parser import normalize_zap_findings
 from scanners.zap_runner import (
     ZapScanError,
     run_zap_scan,
 )
+from services.auth_service import get_current_user_id
 from services.db_service import (
     create_scan,
     finish_scan,
     get_or_create_project,
+    get_scan,
     insert_findings,
+    list_findings,
 )
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+# DAST scans run against a single shared ZAP instance/session (see
+# zap_runner.py's per-scan zap.core.new_session() call). Running two scans
+# at once would have them race to reset/use that same session, so scans are
+# serialized here rather than trying to make ZAP itself handle concurrency.
+_zap_scan_lock = threading.Lock()
 
-@router.post(
-    "/api/dast/scan",
-    response_model=list[Finding],
-)
-def scan_dast(request: DastScanRequest):
+
+def _run_dast_scan_background(user_id: str, project_id: int, scan_id: int, target_url: str, scan_mode: str) -> None:
     """
-    Execute a DAST scan against a running web application.
+    Runs the actual ZAP scan on a worker thread so the HTTP request that
+    triggered it can return immediately. user_id/project_id are captured
+    from the original request here — there's no FastAPI request context
+    (and therefore no Depends()) left once this is running on its own
+    thread, so they're passed in explicitly instead.
     """
-
-    project_id = get_or_create_project(
-        name=request.target_url,
-        source_type="upload",
-    )
-
-    scan_id = create_scan(
-        project_id,
-        "dast",
-    )
-
-    logger.info(
-        "Starting %s DAST scan #%s against %s",
-        request.scan_mode.upper(),
-        scan_id,
-        request.target_url,
-    )
-
     try:
-
-        raw_alerts = run_zap_scan(
-            target_url=request.target_url,
-            scan_mode=request.scan_mode,
-        )
+        with _zap_scan_lock:
+            logger.info(
+                "Starting %s DAST scan #%s against %s",
+                scan_mode.upper(),
+                scan_id,
+                target_url,
+            )
+            raw_alerts = run_zap_scan(target_url=target_url, scan_mode=scan_mode)
 
         findings = normalize_zap_findings(raw_alerts)
-
-        insert_findings(
-            scan_id,
-            findings,
-        )
-
-        finish_scan(
-            scan_id,
-            "completed",
-        )
+        insert_findings(user_id, scan_id, project_id, findings)
+        finish_scan(user_id, scan_id, "completed")
 
         logger.info(
             "DAST scan #%s completed successfully with %d findings",
@@ -72,47 +58,79 @@ def scan_dast(request: DastScanRequest):
             len(findings),
         )
 
-        return findings
-
     except ZapScanError as exc:
+        logger.error("DAST scan #%s failed: %s", scan_id, exc)
+        finish_scan(user_id, scan_id, "failed", error_message=str(exc))
 
-        logger.error(
-            "DAST scan #%s failed: %s",
-            scan_id,
-            exc,
-        )
+    except Exception as exc:  # noqa: BLE001 — this runs unsupervised on a
+        # background thread with no request/response cycle left to catch
+        # it; anything unexpected must still mark the scan failed with a
+        # reason, or it would sit as "running" forever.
+        logger.exception("Unexpected DAST error on scan #%s", scan_id)
+        finish_scan(user_id, scan_id, "failed", error_message=str(exc))
 
-        finish_scan(
-            scan_id,
-            "failed",
-        )
 
-        raise HTTPException(
-            status_code=502,
-            detail=str(exc),
-        ) from exc
+@router.post("/api/dast/scan")
+def scan_dast(request: DastScanRequest, user_id: str = Depends(get_current_user_id)):
+    """
+    Kicks off a DAST scan against a running web application and returns
+    immediately with a scan_id — it does NOT wait for the scan to finish.
+    Poll GET /api/dast/scan/{scan_id} for status and, once completed, the
+    findings.
+    """
+    project_id = get_or_create_project(
+        user_id,
+        name=request.target_url,
+        source_type="upload",
+    )
 
-    except Exception as exc:
-        # unexpected (not just ZapScanError) so we still return a clean 500
-        # instead of an unhandled crash.
+    scan_id = create_scan(user_id, project_id, "dast")
 
-        logger.exception("Unexpected DAST error")
+    thread = threading.Thread(
+        target=_run_dast_scan_background,
+        args=(user_id, project_id, scan_id, request.target_url, request.scan_mode),
+        daemon=True,
+    )
+    thread.start()
 
-        try:
-            finish_scan(
-                scan_id,
-                "failed",
-            )
-        except Exception as cleanup_exc:  # noqa: BLE001 — this is already
-            # inside error handling for the original exception; a failure
-            # here must not mask `exc`, just get logged.
-            logger.error(
-                "Also failed to mark scan #%s as failed: %s",
-                scan_id,
-                cleanup_exc,
-            )
+    logger.info(
+        "Queued %s DAST scan #%s against %s (running in background)",
+        request.scan_mode.upper(),
+        scan_id,
+        request.target_url,
+    )
 
-        raise HTTPException(
-            status_code=500,
-            detail=str(exc),
-        ) from exc
+    return {
+        "scan_id": scan_id,
+        "status": "running",
+        "target_url": request.target_url,
+        "scan_mode": request.scan_mode,
+    }
+
+
+@router.get("/api/dast/scan/{scan_id}")
+def get_dast_scan_status(scan_id: int, user_id: str = Depends(get_current_user_id)):
+    """
+    Poll this while a scan is running. Short-lived request by design — safe
+    to call every few seconds even over a flaky tunnel, unlike waiting on
+    the original POST for the scan's entire duration.
+    """
+    scan = get_scan(user_id, scan_id)
+    if not scan or scan["scan_type"] != "dast":
+        raise HTTPException(status_code=404, detail="DAST scan not found")
+
+    status = scan["status"]
+    response = {
+        "scan_id": scan_id,
+        "status": status,
+        "started_at": scan["started_at"],
+        "finished_at": scan["finished_at"],
+    }
+
+    if status == "completed":
+        findings, _total = list_findings(user_id, scan_id=scan_id)
+        response["findings"] = findings
+    elif status == "failed":
+        response["error"] = scan.get("error_message") or "DAST scan failed."
+
+    return response

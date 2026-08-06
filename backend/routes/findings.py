@@ -3,13 +3,15 @@ routes/findings.py
 
 Read-only view over the findings persisted by the scan endpoints, plus a
 DELETE action to clear accumulated findings once they're no longer needed
-(without deleting scan/project history).
+(without deleting scan/project history). Every route requires a signed-in
+user and only ever sees/touches that user's own findings.
 """
 
 import logging
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
+from services.auth_service import get_current_user_id
 from services.db_service import delete_all_findings, list_findings
 
 router = APIRouter(prefix="/api/findings", tags=["findings"])
@@ -24,8 +26,10 @@ def get_findings(
     severity: str | None = Query(default=None, description="CRITICAL/HIGH/MEDIUM/LOW"),
     scanner: str | None = Query(default=None, description="semgrep/trivy/checkov/secrets"),
     limit: int | None = Query(default=None, description="Cap the number of rows returned, most recent first. Omit for no limit."),
+    user_id: str = Depends(get_current_user_id),
 ):
     findings, total = list_findings(
+        user_id,
         project_id=project_id,
         scan_id=scan_id,
         severity=severity,
@@ -39,12 +43,13 @@ def get_findings(
 def clear_findings(
     project_id: int | None = Query(default=None, description="Only clear findings for this project"),
     scanner: str | None = Query(default=None, description="Only clear findings from this scanner"),
+    user_id: str = Depends(get_current_user_id),
 ):
     """Deletes findings rows so the dashboard doesn't keep growing unbounded
     across repeated test scans. Scan/project history is left intact —
     only the individual finding rows are removed."""
     try:
-        deleted = delete_all_findings(project_id=project_id, scanner=scanner)
+        deleted = delete_all_findings(user_id, project_id=project_id, scanner=scanner)
     except Exception as exc:
         # Route boundary: surface as a clean 500 rather than a raw
         # traceback for a destructive action.

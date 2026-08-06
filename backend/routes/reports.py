@@ -10,10 +10,11 @@ POST /api/reports/pdf
 
 import logging
 
-from fastapi import APIRouter, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel
 
 from models.finding import Finding
+from services.auth_service import get_current_user_id
 from services.db_service import get_project, get_scan, list_findings, list_scans
 from services.report_service import generate_pdf_report
 
@@ -38,7 +39,7 @@ class ReportRequest(BaseModel):
 
 
 @router.post("/api/reports/pdf")
-def generate_report(request: ReportRequest):
+def generate_report(request: ReportRequest, user_id: str = Depends(get_current_user_id)):
     try:
         findings_dicts = [f.model_dump() for f in request.findings]
         pdf_bytes = generate_pdf_report(
@@ -70,23 +71,25 @@ def generate_report(request: ReportRequest):
 # ── Phase 2 — list past scans, regenerate a PDF from stored findings ──
 
 @router.get("/api/reports")
-def get_reports(project_id: int | None = None):
-    """Lists every completed (report-able) scan, instead of only being able
-    to generate a PDF on-the-fly right after a scan finishes."""
-    scans = list_scans(project_id=project_id)
+def get_reports(project_id: int | None = None, user_id: str = Depends(get_current_user_id)):
+    """Lists every completed (report-able) scan belonging to the
+    signed-in user, instead of only being able to generate a PDF
+    on-the-fly right after a scan finishes."""
+    scans = list_scans(user_id, project_id=project_id)
     return {"count": len(scans), "reports": scans}
 
 
 @router.get("/api/reports/{scan_id}/pdf")
-def regenerate_report(scan_id: int):
+def regenerate_report(scan_id: int, user_id: str = Depends(get_current_user_id)):
     """Rebuilds the same ISO 27001-style PDF for a past scan, using the
-    findings already stored in the DB — no re-scanning required."""
-    scan = get_scan(scan_id)
+    findings already stored in the DB — no re-scanning required. Only
+    works for scans owned by the signed-in user."""
+    scan = get_scan(user_id, scan_id)
     if not scan:
         raise HTTPException(status_code=404, detail="Scan not found")
 
-    project = get_project(scan["project_id"])
-    findings, _total = list_findings(scan_id=scan_id)
+    project = get_project(user_id, scan["project_id"])
+    findings, _total = list_findings(user_id, scan_id=scan_id)
 
     try:
         pdf_bytes = generate_pdf_report(

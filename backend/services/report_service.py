@@ -93,6 +93,43 @@ _SEVERITY_BG_HEX = {
     "unknown":  "#E5E5E5",
 }
 
+# Hard caps so a scan with thousands of findings (a full DAST run against a
+# real site can return 5,000-10,000+ raw ZAP alerts) can never produce a
+# reportlab LayoutError (a single table cell taller than one page) and can't
+# balloon into a multi-thousand-page PDF that takes minutes to build/never
+# finishes. Nothing is dropped from the database — this only bounds what
+# goes into this particular PDF.
+_MAX_FIELD_CHARS = 1200          # any single free-text field in a report cell
+_MAX_DETAILED_FINDINGS = 300     # full per-finding record in Section 2
+_MAX_KEY_ISSUES_ROWS = 500       # rows in the Executive Summary "Key Issues" table
+
+_SEVERITY_SORT_KEY = {"critical": 0, "high": 1, "medium": 2, "low": 3, "unknown": 4}
+
+
+def _safe_text(value, max_chars: int = _MAX_FIELD_CHARS) -> str:
+    """Bounds any free-text field before it goes into a reportlab Paragraph.
+
+    Without this, a single oversized field (e.g. a raw ZAP evidence/response
+    dump in a DAST alert's description) produces a table cell taller than a
+    single page, which reportlab cannot lay out — it raises LayoutError
+    instead of degrading gracefully. Always route finding text through this
+    before wrapping it in Paragraph()."""
+    text = "" if value is None else str(value)
+    text = text.replace("\r\n", "\n").strip()
+    if len(text) > max_chars:
+        text = text[:max_chars].rstrip() + f"… [truncated — {len(text):,} chars total]"
+    return text
+
+
+def _sorted_by_severity(findings: list) -> list:
+    """Critical/High first, so when a huge finding set gets capped for the
+    PDF, the findings that matter most are the ones guaranteed to appear."""
+    return sorted(
+        findings,
+        key=lambda f: _SEVERITY_SORT_KEY.get(_norm_severity(f.get("severity")), 4),
+    )
+
+
 # Laati/Roamassist-style weight-score matrix: (severity -> [(min_count, score), ...] highest bucket first)
 _WEIGHT_BUCKETS = {
     "critical": [(6, 10), (3, 9), (1, 8)],
@@ -539,7 +576,9 @@ def _executive_summary(story, styles, counts: dict, findings: list):
     story.append(Paragraph("Key Issues Summary", styles["SubHeading"]))
     header = ["Sr.", "Key Issue", "Severity", "Affected Location", "CVE / CWE", "New/Repeat"]
     rows = [header]
-    for i, f in enumerate(findings, start=1):
+    ordered = _sorted_by_severity(findings)
+    shown = ordered[:_MAX_KEY_ISSUES_ROWS]
+    for i, f in enumerate(shown, start=1):
         sev = _norm_severity(f.get("severity"))
         sev_para = Paragraph(f'<font color="{_SEVERITY_HEX[sev]}"><b>{sev.upper()}</b></font>', styles["CellSmall"])
         title = f.get("title") or f.get("rule") or "Untitled finding"
@@ -547,11 +586,22 @@ def _executive_summary(story, styles, counts: dict, findings: list):
         cve_cwe = ", ".join(filter(None, [f.get("cve"), f.get("cwe")])) or "—"
         rows.append([
             str(i),
-            Paragraph(_escape(title), styles["CellSmall"]),
+            Paragraph(_escape(_safe_text(title, 180)), styles["CellSmall"]),
             sev_para,
-            Paragraph(_escape(loc), styles["CellSmall"]),
-            Paragraph(_escape(cve_cwe), styles["CellSmall"]),
+            Paragraph(_escape(_safe_text(loc, 180)), styles["CellSmall"]),
+            Paragraph(_escape(_safe_text(cve_cwe, 80)), styles["CellSmall"]),
             Paragraph(f.get("new_or_repeat", "New"), styles["CellSmall"]),
+        ])
+    if len(ordered) > _MAX_KEY_ISSUES_ROWS:
+        rows.append([
+            "—",
+            Paragraph(
+                f"<i>+ {len(ordered) - _MAX_KEY_ISSUES_ROWS:,} additional lower-severity "
+                f"finding(s) not listed here — see Section 2 / the full findings export "
+                f"for the complete list.</i>",
+                styles["CellSmall"],
+            ),
+            "", "", "", "",
         ])
 
     col_widths = [1 * cm, 4.5 * cm, 1.8 * cm, 4 * cm, 2.7 * cm, 2 * cm]
@@ -632,7 +682,23 @@ def _obs_field_row(label, value, styles, label_bg="#0E7C86"):
 def _detailed_observations(story, styles, findings: list, repo_label: str):
     story.append(Paragraph("2. Detailed Observations", styles["SectionHeading"]))
 
-    for i, f in enumerate(findings, start=1):
+    ordered = _sorted_by_severity(findings)
+    shown = ordered[:_MAX_DETAILED_FINDINGS]
+    omitted = len(ordered) - len(shown)
+
+    if omitted > 0:
+        story.append(Paragraph(
+            f"This assessment produced {len(ordered):,} findings in total. To keep this "
+            f"document a manageable size, full detail is shown below for the "
+            f"{len(shown):,} highest-severity findings; the remaining {omitted:,} "
+            f"lower-severity finding(s) are summarized in the table at the end of this "
+            f"section. The complete dataset remains available via the SecureFlow "
+            f"dashboard and findings API.",
+            styles["Body"],
+        ))
+        story.append(Spacer(1, 0.4 * cm))
+
+    for i, f in enumerate(shown, start=1):
         sev = _norm_severity(f.get("severity"))
         title = f.get("title") or f.get("rule") or "Untitled finding"
         location = f.get("affected_location") or repo_label or "—"
@@ -655,20 +721,20 @@ def _detailed_observations(story, styles, findings: list, repo_label: str):
 
         rows = [
             [Paragraph("Sr. No.", styles["ObsFieldLabel"]), Paragraph(str(i), styles["ObsFieldValue"])],
-            [Paragraph("Name of Vulnerability", styles["ObsFieldLabel"]), Paragraph(f"<b>{_escape(title)}</b>", styles["ObsFieldValue"])],
-            [Paragraph("Vulnerable Location", styles["ObsFieldLabel"]), Paragraph(_escape(location), styles["ObsFieldValue"])],
-            [Paragraph("Vulnerable Path / Line", styles["ObsFieldLabel"]), Paragraph(_escape(path), styles["ObsFieldValue"])],
-            [Paragraph("Vulnerable Parameter", styles["ObsFieldLabel"]), Paragraph(_escape(parameter), styles["ObsFieldValue"])],
-            [Paragraph("CVE", styles["ObsFieldLabel"]), Paragraph(_escape(cve), styles["ObsFieldValue"])],
-            [Paragraph("CWE", styles["ObsFieldLabel"]), Paragraph(_escape(cwe), styles["ObsFieldValue"])],
+            [Paragraph("Name of Vulnerability", styles["ObsFieldLabel"]), Paragraph(f"<b>{_escape(_safe_text(title, 300))}</b>", styles["ObsFieldValue"])],
+            [Paragraph("Vulnerable Location", styles["ObsFieldLabel"]), Paragraph(_escape(_safe_text(location, 500)), styles["ObsFieldValue"])],
+            [Paragraph("Vulnerable Path / Line", styles["ObsFieldLabel"]), Paragraph(_escape(_safe_text(path, 500)), styles["ObsFieldValue"])],
+            [Paragraph("Vulnerable Parameter", styles["ObsFieldLabel"]), Paragraph(_escape(_safe_text(parameter, 300)), styles["ObsFieldValue"])],
+            [Paragraph("CVE", styles["ObsFieldLabel"]), Paragraph(_escape(_safe_text(cve, 200)), styles["ObsFieldValue"])],
+            [Paragraph("CWE", styles["ObsFieldLabel"]), Paragraph(_escape(_safe_text(cwe, 200)), styles["ObsFieldValue"])],
             [Paragraph("CVSS", styles["ObsFieldLabel"]), Paragraph(
-                f'<font color="{_SEVERITY_HEX[sev]}"><b>{_escape(cvss_display)}</b></font>', styles["ObsFieldValue"])],
-            [Paragraph("EPSS Score", styles["ObsFieldLabel"]), Paragraph(_escape(str(epss)), styles["ObsFieldValue"])],
-            [Paragraph("Description", styles["ObsFieldLabel"]), Paragraph(_escape(description), styles["ObsFieldValue"])],
-            [Paragraph("Workaround / Solutions / Recommendations", styles["ObsFieldLabel"]), Paragraph(_escape(recommendation), styles["ObsFieldValue"])],
-            [Paragraph("References", styles["ObsFieldLabel"]), Paragraph(_escape(refs_text), styles["ObsFieldValue"])],
-            [Paragraph("Additional Observations", styles["ObsFieldLabel"]), Paragraph(_escape(additional), styles["ObsFieldValue"])],
-            [Paragraph("Revalidation Status", styles["ObsFieldLabel"]), Paragraph(f"<b>{_escape(revalidation)}</b>", styles["ObsFieldValue"])],
+                f'<font color="{_SEVERITY_HEX[sev]}"><b>{_escape(_safe_text(cvss_display, 200))}</b></font>', styles["ObsFieldValue"])],
+            [Paragraph("EPSS Score", styles["ObsFieldLabel"]), Paragraph(_escape(_safe_text(str(epss), 100)), styles["ObsFieldValue"])],
+            [Paragraph("Description", styles["ObsFieldLabel"]), Paragraph(_escape(_safe_text(description)), styles["ObsFieldValue"])],
+            [Paragraph("Workaround / Solutions / Recommendations", styles["ObsFieldLabel"]), Paragraph(_escape(_safe_text(recommendation)), styles["ObsFieldValue"])],
+            [Paragraph("References", styles["ObsFieldLabel"]), Paragraph(_escape(_safe_text(refs_text, 600)), styles["ObsFieldValue"])],
+            [Paragraph("Additional Observations", styles["ObsFieldLabel"]), Paragraph(_escape(_safe_text(additional)), styles["ObsFieldValue"])],
+            [Paragraph("Revalidation Status", styles["ObsFieldLabel"]), Paragraph(f"<b>{_escape(_safe_text(revalidation, 100))}</b>", styles["ObsFieldValue"])],
         ]
 
         t = Table(rows, colWidths=[4.5 * cm, 9.5 * cm])
@@ -683,9 +749,44 @@ def _detailed_observations(story, styles, findings: list, repo_label: str):
             ("LEFTPADDING", (0, 0), (-1, -1), 6),
             ("RIGHTPADDING", (0, 0), (-1, -1), 6),
         ]))
+        # Each field is now length-capped by _safe_text, so this table can
+        # never exceed a page height — KeepTogether is safe here again.
         story.append(KeepTogether([t, Spacer(1, 0.5 * cm)]))
-        if i < len(findings):
+        if i < len(shown):
             story.append(PageBreak())
+
+    if omitted > 0:
+        story.append(PageBreak())
+        story.append(Paragraph("2.1 Additional Findings (Summary)", styles["SubHeading"]))
+        story.append(Paragraph(
+            f"The following {omitted:,} finding(s) were omitted from the detailed section "
+            f"above and are listed here in summary form only.",
+            styles["Body"],
+        ))
+        story.append(Spacer(1, 0.3 * cm))
+        rem_rows = [["Sr.", "Finding", "Severity", "Location"]]
+        for j, f in enumerate(ordered[len(shown):], start=len(shown) + 1):
+            sev = _norm_severity(f.get("severity"))
+            title = f.get("title") or f.get("rule") or "Untitled finding"
+            loc = f.get("affected_path") or f.get("file") or "—"
+            rem_rows.append([
+                str(j),
+                Paragraph(_escape(_safe_text(title, 180)), styles["CellSmall"]),
+                Paragraph(f'<font color="{_SEVERITY_HEX[sev]}"><b>{sev.upper()}</b></font>', styles["CellSmall"]),
+                Paragraph(_escape(_safe_text(loc, 180)), styles["CellSmall"]),
+            ])
+        t_rem = Table(rem_rows, colWidths=[1 * cm, 6.5 * cm, 2.5 * cm, 4 * cm], repeatRows=1)
+        t_rem.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0E7C86")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, -1), 8.5),
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#DDDDDD")),
+            ("TOPPADDING", (0, 0), (-1, -1), 4),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F7F9FC")]),
+        ]))
+        story.append(t_rem)
 
     story.append(PageBreak())
 

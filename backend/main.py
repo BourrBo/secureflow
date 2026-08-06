@@ -1,6 +1,8 @@
+from dotenv import load_dotenv
+load_dotenv()
+
 import logging
 
-from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -15,7 +17,7 @@ from routes.sast import router as sast_router
 from routes.secrets import router as secrets_router
 from services.db_service import init_db
 
-load_dotenv()
+
 
 logging.basicConfig(
     level=logging.INFO,
