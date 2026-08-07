@@ -1,4 +1,5 @@
 from dotenv import load_dotenv
+
 load_dotenv()
 
 import logging
@@ -16,8 +17,6 @@ from routes.reports import router as reports_router
 from routes.sast import router as sast_router
 from routes.secrets import router as secrets_router
 from services.db_service import init_db
-
-
 
 logging.basicConfig(
     level=logging.INFO,
