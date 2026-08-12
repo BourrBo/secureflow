@@ -29,12 +29,12 @@ export const projectsQuery = () =>
     ...common,
   });
 
-/** Capped listing for the workspace Findings page — the table can hold 15k+ rows. */
-export const findingsPageQuery = (limit = 10) =>
+/** Paginated listing for the workspace Findings page — the table can hold 15k+ rows. */
+export const findingsPageQuery = (limit: number, offset: number) =>
   queryOptions({
-    queryKey: ["findings-page", limit],
+    queryKey: ["findings-page", limit, offset],
     queryFn: async () => {
-      const r = await api.listFindings({ limit });
+      const r = await api.listFindings({ limit, offset });
       const list = Array.isArray(r) ? r : (r?.findings ?? []);
       const total = !Array.isArray(r) && typeof r?.total === "number" ? r.total : list.length;
       return { items: list.map(normalizeFinding), total };

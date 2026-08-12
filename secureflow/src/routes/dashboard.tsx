@@ -1,11 +1,14 @@
-import { createFileRoute, Link, Outlet, useNavigate } from "@tanstack/react-router";
-import { useEffect } from "react";
+import { createFileRoute, Link, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/dashboard/AppSidebar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Bell, Search, Play, LogOut } from "lucide-react";
 import { useAuth } from "@/lib/auth";
+import { ScanResultsProvider } from "@/lib/scanResults";
+import { DastScanProvider } from "@/lib/dastScan";
 
 export const Route = createFileRoute("/dashboard")({
   head: () => ({
@@ -17,6 +20,12 @@ export const Route = createFileRoute("/dashboard")({
 function DashboardLayout() {
   const { user, loading, signOut } = useAuth();
   const navigate = useNavigate();
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const [searchValue, setSearchValue] = useState("");
+
+  useEffect(() => {
+    setSearchValue("");
+  }, [pathname]);
 
   useEffect(() => {
     if (!loading && !user) navigate({ to: "/login" });
@@ -40,28 +49,55 @@ function DashboardLayout() {
     `${user.first_name?.[0] ?? user.email[0]}${user.last_name?.[0] ?? ""}`.toUpperCase();
 
   return (
-    <SidebarProvider>
+    <ScanResultsProvider>
+      <DastScanProvider>
+        <SidebarProvider>
       <div className="flex min-h-screen w-full bg-background">
         <AppSidebar />
         <div className="flex min-w-0 flex-1 flex-col">
           <header className="sticky top-0 z-30 flex h-14 items-center gap-3 border-b border-border/60 bg-background/80 px-4 backdrop-blur-xl">
             <SidebarTrigger />
-            <div className="relative hidden max-w-md flex-1 md:block">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                placeholder="Search findings, projects, CVEs…"
-                className="h-9 pl-9 text-[13px]"
-              />
-            </div>
+            {pathname !== "/dashboard/" && (
+              <div className="relative hidden max-w-md flex-1 md:block">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={searchValue}
+                  onChange={(e) => setSearchValue(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && searchValue.trim()) {
+                      navigate({
+                        to: "/dashboard/findings",
+                        search: { q: searchValue.trim() },
+                      });
+                    }
+                  }}
+                  placeholder="Search findings, projects, CVEs…"
+                  className="h-9 pl-9 text-[13px]"
+                />
+              </div>
+            )}
             <div className="ml-auto flex items-center gap-2">
               <Button variant="hero" size="sm" asChild>
                 <Link to="/dashboard/sast">
                   <Play className="h-3.5 w-3.5" /> Run scan
                 </Link>
               </Button>
-              <Button variant="ghost" size="icon">
-                <Bell className="h-4 w-4" />
-              </Button>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button variant="ghost" size="icon" aria-label="Open notifications">
+                    <Bell className="h-4 w-4" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent align="end" className="w-72">
+                  <div className="space-y-1">
+                    <h4 className="font-medium text-[13px]">Notifications</h4>
+                    <p className="text-[11px] text-muted-foreground">No notifications yet</p>
+                    <p className="text-[11px] text-muted-foreground">
+                      You'll see scan completions and alerts here.
+                    </p>
+                  </div>
+                </PopoverContent>
+              </Popover>
               {user.avatar_url ? (
                 <img src={user.avatar_url} alt={user.email} className="h-8 w-8 rounded-full" />
               ) : (
@@ -93,6 +129,8 @@ function DashboardLayout() {
           </main>
         </div>
       </div>
-    </SidebarProvider>
+      </SidebarProvider>
+    </DastScanProvider>
+    </ScanResultsProvider>
   );
 }

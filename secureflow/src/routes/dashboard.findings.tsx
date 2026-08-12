@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -22,9 +22,15 @@ import { api } from "@/lib/api";
 import { countBySeverity, MODULE_LABEL, type Severity } from "@/lib/security";
 import { Bug, ShieldAlert, AlertTriangle, Search, Download, Trash2, Loader2 } from "lucide-react";
 
-const PAGE_LIMIT = 10;
+const PAGE_SIZE = 25;
 
-export const Route = createFileRoute("/dashboard/findings")({ component: Findings });
+export const Route = createFileRoute("/dashboard/findings")({
+  validateSearch: (search: Record<string, unknown>) => ({
+    q: typeof search.q === "string" ? search.q : "",
+  }),
+  component: Findings,
+});
+
 
 const FILTERS: Array<{ label: string; value: Severity | "all" }> = [
   { label: "All", value: "all" },
@@ -35,11 +41,17 @@ const FILTERS: Array<{ label: string; value: Severity | "all" }> = [
 ];
 
 function Findings() {
+  const { q: initialQ } = Route.useSearch();
   const [severity, setSeverity] = useState<Severity | "all">("all");
-  const [q, setQ] = useState("");
+  const [q, setQ] = useState(initialQ ?? "");
+  const [page, setPage] = useState(0);
   const [clearing, setClearing] = useState(false);
   const queryClient = useQueryClient();
-  const { data, isLoading, error } = useQuery(findingsPageQuery(PAGE_LIMIT));
+  const { data, isLoading, error } = useQuery(findingsPageQuery(PAGE_SIZE, page * PAGE_SIZE));
+
+  useEffect(() => {
+    setPage(0);
+  }, [q, severity]);
 
   const all = useMemo(() => data?.items ?? [], [data]);
   const total = data?.total ?? all.length;
@@ -191,8 +203,32 @@ function Findings() {
           }
         />
         {!isLoading && !error && all.length > 0 && (
-          <div className="mt-3 text-[11px] text-muted-foreground">
-            Showing {all.length.toLocaleString()} of {total.toLocaleString()} findings
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+            <span className="text-[11px] text-muted-foreground">
+              Showing {(page * PAGE_SIZE + 1).toLocaleString()}–
+              {(page * PAGE_SIZE + all.length).toLocaleString()} of {total.toLocaleString()} findings
+            </span>
+            <div className="flex items-center gap-1">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={page === 0}
+                onClick={() => setPage((p) => Math.max(0, p - 1))}
+              >
+                Prev
+              </Button>
+              <span className="px-2 text-[11px] text-muted-foreground">
+                Page {page + 1} of {Math.max(1, Math.ceil(total / PAGE_SIZE))}
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={page * PAGE_SIZE + all.length >= total}
+                onClick={() => setPage((p) => p + 1)}
+              >
+                Next
+              </Button>
+            </div>
           </div>
         )}
       </Panel>

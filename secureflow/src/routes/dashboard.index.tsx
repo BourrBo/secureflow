@@ -25,7 +25,6 @@ import {
   AlertTriangle,
   FolderGit2,
   ArrowRight,
-  Play,
   Code2,
   Package,
   KeyRound,
@@ -80,11 +79,6 @@ function Overview() {
         eyebrow="Workspace overview"
         title="Security posture"
         description="A unified view of every finding, module and framework across your organization."
-        actions={
-          <Button variant="hero" size="sm">
-            <Play className="h-3.5 w-3.5" /> Run all scans
-          </Button>
-        }
       />
 
       <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4">

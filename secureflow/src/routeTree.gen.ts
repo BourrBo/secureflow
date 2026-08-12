@@ -9,37 +9,33 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as IndexRouteImport } from './routes/index'
-import { Route as DashboardRouteImport } from './routes/dashboard'
-import { Route as ForgotPasswordRouteImport } from './routes/forgot-password'
-import { Route as LoginRouteImport } from './routes/login'
 import { Route as SignupRouteImport } from './routes/signup'
+import { Route as ResetPasswordRouteImport } from './routes/reset-password'
+import { Route as LoginRouteImport } from './routes/login'
+import { Route as ForgotPasswordRouteImport } from './routes/forgot-password'
+import { Route as DashboardRouteImport } from './routes/dashboard'
+import { Route as IndexRouteImport } from './routes/index'
 import { Route as DashboardIndexRouteImport } from './routes/dashboard.index'
-import { Route as DashboardComplianceRouteImport } from './routes/dashboard.compliance'
-import { Route as DashboardContainerRouteImport } from './routes/dashboard.container'
-import { Route as DashboardDastRouteImport } from './routes/dashboard.dast'
-import { Route as DashboardFindingsRouteImport } from './routes/dashboard.findings'
-import { Route as DashboardIacRouteImport } from './routes/dashboard.iac'
-import { Route as DashboardProjectsRouteImport } from './routes/dashboard.projects'
-import { Route as DashboardReportsRouteImport } from './routes/dashboard.reports'
-import { Route as DashboardSastRouteImport } from './routes/dashboard.sast'
-import { Route as DashboardScaRouteImport } from './routes/dashboard.sca'
-import { Route as DashboardSecretsRouteImport } from './routes/dashboard.secrets'
 import { Route as DashboardSettingsRouteImport } from './routes/dashboard.settings'
+import { Route as DashboardSecretsRouteImport } from './routes/dashboard.secrets'
+import { Route as DashboardScaRouteImport } from './routes/dashboard.sca'
+import { Route as DashboardSastRouteImport } from './routes/dashboard.sast'
+import { Route as DashboardReportsRouteImport } from './routes/dashboard.reports'
+import { Route as DashboardProjectsRouteImport } from './routes/dashboard.projects'
+import { Route as DashboardIacRouteImport } from './routes/dashboard.iac'
+import { Route as DashboardFindingsRouteImport } from './routes/dashboard.findings'
+import { Route as DashboardDastRouteImport } from './routes/dashboard.dast'
+import { Route as DashboardContainerRouteImport } from './routes/dashboard.container'
+import { Route as DashboardComplianceRouteImport } from './routes/dashboard.compliance'
 
-const IndexRoute = IndexRouteImport.update({
-  id: '/',
-  path: '/',
+const SignupRoute = SignupRouteImport.update({
+  id: '/signup',
+  path: '/signup',
   getParentRoute: () => rootRouteImport,
 } as any)
-const DashboardRoute = DashboardRouteImport.update({
-  id: '/dashboard',
-  path: '/dashboard',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ForgotPasswordRoute = ForgotPasswordRouteImport.update({
-  id: '/forgot-password',
-  path: '/forgot-password',
+const ResetPasswordRoute = ResetPasswordRouteImport.update({
+  id: '/reset-password',
+  path: '/reset-password',
   getParentRoute: () => rootRouteImport,
 } as any)
 const LoginRoute = LoginRouteImport.update({
@@ -47,9 +43,19 @@ const LoginRoute = LoginRouteImport.update({
   path: '/login',
   getParentRoute: () => rootRouteImport,
 } as any)
-const SignupRoute = SignupRouteImport.update({
-  id: '/signup',
-  path: '/signup',
+const ForgotPasswordRoute = ForgotPasswordRouteImport.update({
+  id: '/forgot-password',
+  path: '/forgot-password',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DashboardRoute = DashboardRouteImport.update({
+  id: '/dashboard',
+  path: '/dashboard',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const IndexRoute = IndexRouteImport.update({
+  id: '/',
+  path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DashboardIndexRoute = DashboardIndexRouteImport.update({
@@ -57,49 +63,9 @@ const DashboardIndexRoute = DashboardIndexRouteImport.update({
   path: '/',
   getParentRoute: () => DashboardRoute,
 } as any)
-const DashboardComplianceRoute = DashboardComplianceRouteImport.update({
-  id: '/compliance',
-  path: '/compliance',
-  getParentRoute: () => DashboardRoute,
-} as any)
-const DashboardContainerRoute = DashboardContainerRouteImport.update({
-  id: '/container',
-  path: '/container',
-  getParentRoute: () => DashboardRoute,
-} as any)
-const DashboardDastRoute = DashboardDastRouteImport.update({
-  id: '/dast',
-  path: '/dast',
-  getParentRoute: () => DashboardRoute,
-} as any)
-const DashboardFindingsRoute = DashboardFindingsRouteImport.update({
-  id: '/findings',
-  path: '/findings',
-  getParentRoute: () => DashboardRoute,
-} as any)
-const DashboardIacRoute = DashboardIacRouteImport.update({
-  id: '/iac',
-  path: '/iac',
-  getParentRoute: () => DashboardRoute,
-} as any)
-const DashboardProjectsRoute = DashboardProjectsRouteImport.update({
-  id: '/projects',
-  path: '/projects',
-  getParentRoute: () => DashboardRoute,
-} as any)
-const DashboardReportsRoute = DashboardReportsRouteImport.update({
-  id: '/reports',
-  path: '/reports',
-  getParentRoute: () => DashboardRoute,
-} as any)
-const DashboardSastRoute = DashboardSastRouteImport.update({
-  id: '/sast',
-  path: '/sast',
-  getParentRoute: () => DashboardRoute,
-} as any)
-const DashboardScaRoute = DashboardScaRouteImport.update({
-  id: '/sca',
-  path: '/sca',
+const DashboardSettingsRoute = DashboardSettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
   getParentRoute: () => DashboardRoute,
 } as any)
 const DashboardSecretsRoute = DashboardSecretsRouteImport.update({
@@ -107,9 +73,49 @@ const DashboardSecretsRoute = DashboardSecretsRouteImport.update({
   path: '/secrets',
   getParentRoute: () => DashboardRoute,
 } as any)
-const DashboardSettingsRoute = DashboardSettingsRouteImport.update({
-  id: '/settings',
-  path: '/settings',
+const DashboardScaRoute = DashboardScaRouteImport.update({
+  id: '/sca',
+  path: '/sca',
+  getParentRoute: () => DashboardRoute,
+} as any)
+const DashboardSastRoute = DashboardSastRouteImport.update({
+  id: '/sast',
+  path: '/sast',
+  getParentRoute: () => DashboardRoute,
+} as any)
+const DashboardReportsRoute = DashboardReportsRouteImport.update({
+  id: '/reports',
+  path: '/reports',
+  getParentRoute: () => DashboardRoute,
+} as any)
+const DashboardProjectsRoute = DashboardProjectsRouteImport.update({
+  id: '/projects',
+  path: '/projects',
+  getParentRoute: () => DashboardRoute,
+} as any)
+const DashboardIacRoute = DashboardIacRouteImport.update({
+  id: '/iac',
+  path: '/iac',
+  getParentRoute: () => DashboardRoute,
+} as any)
+const DashboardFindingsRoute = DashboardFindingsRouteImport.update({
+  id: '/findings',
+  path: '/findings',
+  getParentRoute: () => DashboardRoute,
+} as any)
+const DashboardDastRoute = DashboardDastRouteImport.update({
+  id: '/dast',
+  path: '/dast',
+  getParentRoute: () => DashboardRoute,
+} as any)
+const DashboardContainerRoute = DashboardContainerRouteImport.update({
+  id: '/container',
+  path: '/container',
+  getParentRoute: () => DashboardRoute,
+} as any)
+const DashboardComplianceRoute = DashboardComplianceRouteImport.update({
+  id: '/compliance',
+  path: '/compliance',
   getParentRoute: () => DashboardRoute,
 } as any)
 
@@ -118,6 +124,7 @@ export interface FileRoutesByFullPath {
   '/dashboard': typeof DashboardRouteWithChildren
   '/forgot-password': typeof ForgotPasswordRoute
   '/login': typeof LoginRoute
+  '/reset-password': typeof ResetPasswordRoute
   '/signup': typeof SignupRoute
   '/dashboard/compliance': typeof DashboardComplianceRoute
   '/dashboard/container': typeof DashboardContainerRoute
@@ -136,6 +143,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/forgot-password': typeof ForgotPasswordRoute
   '/login': typeof LoginRoute
+  '/reset-password': typeof ResetPasswordRoute
   '/signup': typeof SignupRoute
   '/dashboard/compliance': typeof DashboardComplianceRoute
   '/dashboard/container': typeof DashboardContainerRoute
@@ -156,6 +164,7 @@ export interface FileRoutesById {
   '/dashboard': typeof DashboardRouteWithChildren
   '/forgot-password': typeof ForgotPasswordRoute
   '/login': typeof LoginRoute
+  '/reset-password': typeof ResetPasswordRoute
   '/signup': typeof SignupRoute
   '/dashboard/compliance': typeof DashboardComplianceRoute
   '/dashboard/container': typeof DashboardContainerRoute
@@ -177,6 +186,7 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/forgot-password'
     | '/login'
+    | '/reset-password'
     | '/signup'
     | '/dashboard/compliance'
     | '/dashboard/container'
@@ -195,6 +205,7 @@ export interface FileRouteTypes {
     | '/'
     | '/forgot-password'
     | '/login'
+    | '/reset-password'
     | '/signup'
     | '/dashboard/compliance'
     | '/dashboard/container'
@@ -214,6 +225,7 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/forgot-password'
     | '/login'
+    | '/reset-password'
     | '/signup'
     | '/dashboard/compliance'
     | '/dashboard/container'
@@ -234,30 +246,24 @@ export interface RootRouteChildren {
   DashboardRoute: typeof DashboardRouteWithChildren
   ForgotPasswordRoute: typeof ForgotPasswordRoute
   LoginRoute: typeof LoginRoute
+  ResetPasswordRoute: typeof ResetPasswordRoute
   SignupRoute: typeof SignupRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/': {
-      id: '/'
-      path: '/'
-      fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
+    '/signup': {
+      id: '/signup'
+      path: '/signup'
+      fullPath: '/signup'
+      preLoaderRoute: typeof SignupRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/dashboard': {
-      id: '/dashboard'
-      path: '/dashboard'
-      fullPath: '/dashboard'
-      preLoaderRoute: typeof DashboardRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/forgot-password': {
-      id: '/forgot-password'
-      path: '/forgot-password'
-      fullPath: '/forgot-password'
-      preLoaderRoute: typeof ForgotPasswordRouteImport
+    '/reset-password': {
+      id: '/reset-password'
+      path: '/reset-password'
+      fullPath: '/reset-password'
+      preLoaderRoute: typeof ResetPasswordRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/login': {
@@ -267,11 +273,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LoginRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/signup': {
-      id: '/signup'
-      path: '/signup'
-      fullPath: '/signup'
-      preLoaderRoute: typeof SignupRouteImport
+    '/forgot-password': {
+      id: '/forgot-password'
+      path: '/forgot-password'
+      fullPath: '/forgot-password'
+      preLoaderRoute: typeof ForgotPasswordRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/dashboard': {
+      id: '/dashboard'
+      path: '/dashboard'
+      fullPath: '/dashboard'
+      preLoaderRoute: typeof DashboardRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/': {
+      id: '/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/dashboard/': {
@@ -281,67 +301,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DashboardIndexRouteImport
       parentRoute: typeof DashboardRoute
     }
-    '/dashboard/compliance': {
-      id: '/dashboard/compliance'
-      path: '/compliance'
-      fullPath: '/dashboard/compliance'
-      preLoaderRoute: typeof DashboardComplianceRouteImport
-      parentRoute: typeof DashboardRoute
-    }
-    '/dashboard/container': {
-      id: '/dashboard/container'
-      path: '/container'
-      fullPath: '/dashboard/container'
-      preLoaderRoute: typeof DashboardContainerRouteImport
-      parentRoute: typeof DashboardRoute
-    }
-    '/dashboard/dast': {
-      id: '/dashboard/dast'
-      path: '/dast'
-      fullPath: '/dashboard/dast'
-      preLoaderRoute: typeof DashboardDastRouteImport
-      parentRoute: typeof DashboardRoute
-    }
-    '/dashboard/findings': {
-      id: '/dashboard/findings'
-      path: '/findings'
-      fullPath: '/dashboard/findings'
-      preLoaderRoute: typeof DashboardFindingsRouteImport
-      parentRoute: typeof DashboardRoute
-    }
-    '/dashboard/iac': {
-      id: '/dashboard/iac'
-      path: '/iac'
-      fullPath: '/dashboard/iac'
-      preLoaderRoute: typeof DashboardIacRouteImport
-      parentRoute: typeof DashboardRoute
-    }
-    '/dashboard/projects': {
-      id: '/dashboard/projects'
-      path: '/projects'
-      fullPath: '/dashboard/projects'
-      preLoaderRoute: typeof DashboardProjectsRouteImport
-      parentRoute: typeof DashboardRoute
-    }
-    '/dashboard/reports': {
-      id: '/dashboard/reports'
-      path: '/reports'
-      fullPath: '/dashboard/reports'
-      preLoaderRoute: typeof DashboardReportsRouteImport
-      parentRoute: typeof DashboardRoute
-    }
-    '/dashboard/sast': {
-      id: '/dashboard/sast'
-      path: '/sast'
-      fullPath: '/dashboard/sast'
-      preLoaderRoute: typeof DashboardSastRouteImport
-      parentRoute: typeof DashboardRoute
-    }
-    '/dashboard/sca': {
-      id: '/dashboard/sca'
-      path: '/sca'
-      fullPath: '/dashboard/sca'
-      preLoaderRoute: typeof DashboardScaRouteImport
+    '/dashboard/settings': {
+      id: '/dashboard/settings'
+      path: '/settings'
+      fullPath: '/dashboard/settings'
+      preLoaderRoute: typeof DashboardSettingsRouteImport
       parentRoute: typeof DashboardRoute
     }
     '/dashboard/secrets': {
@@ -351,11 +315,67 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DashboardSecretsRouteImport
       parentRoute: typeof DashboardRoute
     }
-    '/dashboard/settings': {
-      id: '/dashboard/settings'
-      path: '/settings'
-      fullPath: '/dashboard/settings'
-      preLoaderRoute: typeof DashboardSettingsRouteImport
+    '/dashboard/sca': {
+      id: '/dashboard/sca'
+      path: '/sca'
+      fullPath: '/dashboard/sca'
+      preLoaderRoute: typeof DashboardScaRouteImport
+      parentRoute: typeof DashboardRoute
+    }
+    '/dashboard/sast': {
+      id: '/dashboard/sast'
+      path: '/sast'
+      fullPath: '/dashboard/sast'
+      preLoaderRoute: typeof DashboardSastRouteImport
+      parentRoute: typeof DashboardRoute
+    }
+    '/dashboard/reports': {
+      id: '/dashboard/reports'
+      path: '/reports'
+      fullPath: '/dashboard/reports'
+      preLoaderRoute: typeof DashboardReportsRouteImport
+      parentRoute: typeof DashboardRoute
+    }
+    '/dashboard/projects': {
+      id: '/dashboard/projects'
+      path: '/projects'
+      fullPath: '/dashboard/projects'
+      preLoaderRoute: typeof DashboardProjectsRouteImport
+      parentRoute: typeof DashboardRoute
+    }
+    '/dashboard/iac': {
+      id: '/dashboard/iac'
+      path: '/iac'
+      fullPath: '/dashboard/iac'
+      preLoaderRoute: typeof DashboardIacRouteImport
+      parentRoute: typeof DashboardRoute
+    }
+    '/dashboard/findings': {
+      id: '/dashboard/findings'
+      path: '/findings'
+      fullPath: '/dashboard/findings'
+      preLoaderRoute: typeof DashboardFindingsRouteImport
+      parentRoute: typeof DashboardRoute
+    }
+    '/dashboard/dast': {
+      id: '/dashboard/dast'
+      path: '/dast'
+      fullPath: '/dashboard/dast'
+      preLoaderRoute: typeof DashboardDastRouteImport
+      parentRoute: typeof DashboardRoute
+    }
+    '/dashboard/container': {
+      id: '/dashboard/container'
+      path: '/container'
+      fullPath: '/dashboard/container'
+      preLoaderRoute: typeof DashboardContainerRouteImport
+      parentRoute: typeof DashboardRoute
+    }
+    '/dashboard/compliance': {
+      id: '/dashboard/compliance'
+      path: '/compliance'
+      fullPath: '/dashboard/compliance'
+      preLoaderRoute: typeof DashboardComplianceRouteImport
       parentRoute: typeof DashboardRoute
     }
   }
@@ -400,18 +420,9 @@ const rootRouteChildren: RootRouteChildren = {
   DashboardRoute: DashboardRouteWithChildren,
   ForgotPasswordRoute: ForgotPasswordRoute,
   LoginRoute: LoginRoute,
+  ResetPasswordRoute: ResetPasswordRoute,
   SignupRoute: SignupRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
-
-import type { getRouter } from './router.tsx'
-import type { startInstance } from './start.ts'
-declare module '@tanstack/react-start' {
-  interface Register {
-    ssr: true
-    router: Awaited<ReturnType<typeof getRouter>>
-    config: Awaited<ReturnType<typeof startInstance.getOptions>>
-  }
-}

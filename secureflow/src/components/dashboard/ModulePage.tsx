@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import {
   countBySeverity,
   relativeTime,
@@ -10,7 +10,9 @@ import { PageHeader, Panel, StatCard } from "./primitives";
 import { ModuleFindingsTable } from "./ModuleFindingsTable";
 import { ScanLauncher, type ScanResult } from "./ScanLauncher";
 import { ExportReportButton } from "./ExportReportButton";
-import { Bug, ShieldAlert, AlertTriangle, Clock } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { useScanResult } from "@/lib/scanResults";
+import { Bug, ShieldAlert, AlertTriangle, Clock, RotateCcw } from "lucide-react";
 
 export function ModulePage({ module, description }: { module: ModuleKey; description: string }) {
   const name = MODULE_LABEL[module];
@@ -18,8 +20,7 @@ export function ModulePage({ module, description }: { module: ModuleKey; descrip
    * Module pages are session-scoped: results come only from the scan the user just
    * ran (the POST response), never from the persisted /api/findings aggregate.
    */
-  const [result, setResult] = useState<ScanResult | null>(null);
-  const [ranAt, setRanAt] = useState<Date | null>(null);
+  const { result, ranAt, setResult, resetResult } = useScanResult(module);
 
   const findings = useMemo(
     () => (result?.findings ?? []).map((f, i) => normalizeFinding(f, i)),
@@ -53,9 +54,8 @@ export function ModulePage({ module, description }: { module: ModuleKey; descrip
       >
         <ScanLauncher
           module={module}
-          onResult={(r) => {
+          onResult={(r: ScanResult) => {
             setResult(r);
-            setRanAt(new Date());
           }}
         />
       </Panel>
@@ -94,11 +94,23 @@ export function ModulePage({ module, description }: { module: ModuleKey; descrip
         }
         className="mt-5"
         actions={
-          <ExportReportButton
-            findings={result?.findings ?? []}
-            scanType={module}
-            repoLabel={result?.label ?? ""}
-          />
+          <div className="flex items-center gap-2">
+            <ExportReportButton
+              findings={result?.findings ?? []}
+              scanType={module}
+              repoLabel={result?.label ?? ""}
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={!scanned}
+              onClick={resetResult}
+              title={scanned ? "Clear this module's scan results" : "Nothing to reset yet"}
+            >
+              <RotateCcw className="h-3.5 w-3.5" />
+              Reset
+            </Button>
+          </div>
         }
       >
         <ModuleFindingsTable

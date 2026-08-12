@@ -97,7 +97,9 @@ export type FindingsQuery = {
   severity?: ApiSeverity;
   scanner?: string;
   limit?: number;
+  offset?: number;
 };
+
 
 function qs(params: Record<string, unknown>) {
   const sp = new URLSearchParams();
@@ -220,6 +222,8 @@ export type DastScanStatusResponse = {
   status: "running" | "completed" | "failed";
   started_at?: string | null;
   finished_at?: string | null;
+  progress_phase?: string | null;
+  progress_pct?: number | null;
   findings?: ApiFinding[];
   error?: string;
 };

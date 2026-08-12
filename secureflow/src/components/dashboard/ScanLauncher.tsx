@@ -1,17 +1,11 @@
 import { useRef, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { api, type ApiFinding, type DastMode } from "@/lib/api";
+import { api, type ApiFinding } from "@/lib/api";
 import { MODULE_LABEL, type ModuleKey } from "@/lib/security";
+import { useDastScan } from "@/lib/dastScan";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Loader2, Play, Github, Upload, X } from "lucide-react";
 
 /** git-based modules share one repo-url / zip-upload shape. */
@@ -38,60 +32,34 @@ function extractFindings(res: unknown): ApiFinding[] {
   return [];
 }
 
-function formatElapsed(totalSeconds: number): string {
-  const m = Math.floor(totalSeconds / 60);
-  const s = totalSeconds % 60;
-  return m > 0 ? `${m}m ${s}s` : `${s}s`;
+/** Human label for a DAST phase key, e.g. "active scan" -> "Active scan". */
+function phaseLabel(phase: string | null): string {
+  if (!phase) return "Starting…";
+  if (phase === "starting") return "Starting…";
+  if (phase === "complete") return "Complete";
+  return phase.charAt(0).toUpperCase() + phase.slice(1);
 }
 
-const DAST_POLL_INTERVAL_MS = 4000;
-// A handful of consecutive failed polls (~32s) tolerates a brief tunnel
-// hiccup without giving up — but if the backend is genuinely unreachable
-// for a long stretch, stop polling instead of doing it forever.
-const DAST_MAX_CONSECUTIVE_POLL_FAILURES = 8;
-
-/**
- * Polls GET /api/dast/scan/{scanId} until the scan finishes. Each poll is a
- * short request, so unlike the old single long-blocking POST, a tunnel
- * (ngrok, etc.) dropping one idle connection doesn't lose the whole scan —
- * the next poll a few seconds later just picks the result back up. The scan
- * itself keeps running on the backend regardless of what the frontend is
- * doing, so recovering it is purely a matter of asking again.
- */
-async function pollDastScan(
-  scanId: string | number,
-  onTick?: (elapsedSec: number) => void,
-): Promise<ApiFinding[]> {
-  const start = Date.now();
-  let consecutiveFailures = 0;
-
-  // eslint-disable-next-line no-constant-condition
-  while (true) {
-    await new Promise((resolve) => setTimeout(resolve, DAST_POLL_INTERVAL_MS));
-    onTick?.(Math.round((Date.now() - start) / 1000));
-
-    let statusRes;
-    try {
-      statusRes = await api.getDastScanStatus(scanId);
-      consecutiveFailures = 0;
-    } catch (e) {
-      consecutiveFailures += 1;
-      if (consecutiveFailures >= DAST_MAX_CONSECUTIVE_POLL_FAILURES) {
-        throw new Error(
-          `Lost connection while checking on scan #${scanId}. It may still be running on the backend — check the Reports page in a few minutes.`,
-        );
-      }
-      continue; // transient network hiccup — try again next tick
-    }
-
-    if (statusRes.status === "completed") {
-      return statusRes.findings ?? [];
-    }
-    if (statusRes.status === "failed") {
-      throw new Error(statusRes.error || "DAST scan failed.");
-    }
-    // status === "running" — keep polling
-  }
+function DastProgressBar({ phase, pct }: { phase: string | null; pct: number | null }) {
+  const hasPct = typeof pct === "number";
+  return (
+    <div className="w-full">
+      <div className="mb-1 flex items-center justify-between font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+        <span>{phaseLabel(phase)}</span>
+        {hasPct && <span className="tabular-nums">{pct}%</span>}
+      </div>
+      <div className="h-1.5 w-full overflow-hidden rounded-full bg-secondary">
+        {hasPct ? (
+          <div
+            className="h-full rounded-full bg-[image:var(--gradient-primary)] transition-all duration-500"
+            style={{ width: `${pct}%` }}
+          />
+        ) : (
+          <div className="h-full w-1/3 animate-[pulse_1.5s_ease-in-out_infinite] rounded-full bg-[image:var(--gradient-primary)]" />
+        )}
+      </div>
+    </div>
+  );
 }
 
 export function ScanLauncher({
@@ -107,8 +75,8 @@ export function ScanLauncher({
   const [source, setSource] = useState<Source>("repo");
   const [value, setValue] = useState("");
   const [file, setFile] = useState<File | null>(null);
-  const [mode, setMode] = useState<DastMode>("standard");
-  const [dastElapsedSec, setDastElapsedSec] = useState(0);
+
+  const dast = useDastScan();
 
   const base = REPO_BASE[module];
 
@@ -117,14 +85,6 @@ export function ScanLauncher({
       if (module === "container") {
         if (!value.trim()) throw new Error("Enter a container image reference.");
         return { res: await api.scanContainer(value.trim()), label: value.trim() };
-      }
-      if (module === "dast") {
-        if (!value.trim()) throw new Error("Enter a target URL.");
-        const target = value.trim();
-        const started = await api.scanDast(target, mode);
-        setDastElapsedSec(0);
-        const findings = await pollDastScan(started.scan_id, setDastElapsedSec);
-        return { res: findings, label: target };
       }
       if (!base) throw new Error("Unsupported module.");
       if (source === "zip") {
@@ -148,7 +108,20 @@ export function ScanLauncher({
     },
   });
 
-  const running = mutation.isPending;
+  const dastRunning = dast.state.status === "running";
+  const running = module === "dast" ? dastRunning : mutation.isPending;
+
+  const handleRun = () => {
+    if (module === "dast") {
+      if (!value.trim()) {
+        toast.error("Enter a target URL.");
+        return;
+      }
+      dast.start(value.trim());
+      return;
+    }
+    mutation.mutate();
+  };
 
   return (
     <div className="flex flex-col gap-3">
@@ -216,7 +189,7 @@ export function ScanLauncher({
           </>
         ) : (
           <Input
-            value={value}
+            value={module === "dast" && dastRunning ? (dast.state.targetUrl ?? value) : value}
             disabled={running}
             onChange={(e) => setValue(e.target.value)}
             placeholder={
@@ -237,24 +210,11 @@ export function ScanLauncher({
           />
         )}
 
-        {module === "dast" && (
-          <Select value={mode} onValueChange={(v) => setMode(v as DastMode)} disabled={running}>
-            <SelectTrigger className="h-9 w-[150px] text-[13px]" aria-label="Scan mode">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="quick">Quick</SelectItem>
-              <SelectItem value="standard">Standard</SelectItem>
-              <SelectItem value="full">Full</SelectItem>
-            </SelectContent>
-          </Select>
-        )}
-
         <Button
           variant="hero"
           size="sm"
           disabled={running}
-          onClick={() => mutation.mutate()}
+          onClick={handleRun}
           className="shrink-0"
         >
           {running ? (
@@ -262,21 +222,21 @@ export function ScanLauncher({
           ) : (
             <Play className="h-3.5 w-3.5" />
           )}
-          {running
-            ? module === "dast"
-              ? `Scanning… ${formatElapsed(dastElapsedSec)}`
-              : "Scanning…"
-            : `Run ${name} scan`}
+          {running ? "Scanning…" : `Run ${name} scan`}
         </Button>
       </div>
+
+      {module === "dast" && dastRunning && (
+        <DastProgressBar phase={dast.state.phase} pct={dast.state.pct} />
+      )}
 
       <p className="text-[11px] text-muted-foreground">
         {module === "sca"
           ? "SCA results are generated together with a SAST scan — one run produces both."
           : module === "dast"
-            ? running
-              ? "Scanning in the background — this tab checks in every few seconds, so it's safe to leave open even on a flaky connection."
-              : "Active scanning runs against a live target and can take several minutes."
+            ? dastRunning
+              ? "Running in the background — safe to switch tabs or navigate away, this keeps going and reconnects automatically if your connection drops."
+              : "Full scan only — spider, AJAX spider and active scan, against a live target. Can take several minutes to over an hour depending on the target."
             : running
               ? "Scan in progress — this can take a few minutes for large repositories."
               : "Scans run server-side; results for this run appear below when it completes."}
