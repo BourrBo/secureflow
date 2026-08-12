@@ -158,6 +158,24 @@ def ensure_zap_reachable(config: dict, timeout_secs: int = 90) -> None:
             r'  $env:ZAP_PATH = "C:\Program Files\ZAP\Zed Attack Proxy\zap.bat"'
         )
 
+    if not os.path.isfile(zap_path):
+        # Catches this explicitly rather than letting subprocess.Popen fail
+        # with a bare "[WinError 2] The system cannot find the file
+        # specified" — that error is real but says nothing about *why*, and
+        # ends up verbatim in the frontend's failure toast with no context.
+        # The most common cause: ZAP_PATH points at a location (often a
+        # Temp folder, as here) that got cleaned up, moved, or was never
+        # more than a one-off extraction — not a code problem, an
+        # environment one.
+        raise RuntimeError(
+            f"ZAP_PATH is set to '{zap_path}', but no file exists there "
+            "right now. ZAP may have been moved, reinstalled, or (if this "
+            "path is under a Temp folder) cleaned up by Windows or an "
+            "antivirus since it was last used. Reinstall ZAP or update "
+            "ZAP_PATH to wherever zap.bat currently lives, then restart "
+            "the backend."
+        )
+
     command = [
         zap_path,
         "-daemon",

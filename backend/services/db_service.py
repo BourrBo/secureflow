@@ -20,6 +20,7 @@ Schema (already created in Supabase — see project's Supabase migrations):
 """
 
 import json
+import logging
 import os
 import re
 from contextlib import contextmanager
@@ -29,6 +30,8 @@ import psycopg2
 import psycopg2.extras
 
 from utils.severity import normalize_severity
+
+logger = logging.getLogger(__name__)
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
 
@@ -60,10 +63,37 @@ def get_db():
 
 
 def init_db():
-    """No-op. Schema lives in Supabase migrations now, not created at app
-    startup — kept so main.py's existing init_db() call doesn't need to
-    change."""
-    return
+    """Verifies the DB is reachable, then sweeps any scan left in
+    'running' status from a previous process — that status can only mean
+    "the backend that started this scan died or restarted before it
+    finished" (a clean finish always transitions to 'completed'/'failed'
+    itself). Without this, a scan orphaned by a server restart mid-run
+    (uvicorn --reload picking up a file change, a manual Ctrl+C, a crash)
+    sits on 'running' forever, and the frontend polls it forever without
+    ever getting a terminal status."""
+    if not DATABASE_URL:
+        return
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1")
+            cur.execute(
+                """
+                UPDATE scans
+                SET status = 'failed',
+                    finished_at = now(),
+                    error_message = 'Backend restarted while this scan was in progress.'
+                WHERE status = 'running'
+                RETURNING id
+                """
+            )
+            orphaned = cur.fetchall()
+    if orphaned:
+        logger.warning(
+            "Marked %d scan(s) left running from a previous process as failed: %s",
+            len(orphaned),
+            [r["id"] for r in orphaned],
+        )
+    logger.info("Connected to Postgres successfully.")
 
 
 def _now():
@@ -225,6 +255,23 @@ def finish_scan(user_id: str, scan_id: int, status: str, error_message: str | No
         )
 
 
+def update_scan_progress(user_id: str, scan_id: int, phase: str, pct: int | None) -> None:
+    """
+    Called from the background DAST scan thread as it moves through
+    spider/AJAX-spider/active-scan phases, so GET /api/dast/scan/{id} can
+    report real progress instead of a spinner with no information behind
+    it. Written to the scans row itself (not just an in-memory dict) so it
+    survives being read from a different request than the one that's
+    updating it, and stays inspectable in the DB if needed.
+    """
+    with get_db() as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE scans SET progress_phase = %s, progress_pct = %s "
+            "WHERE id = %s AND user_id = %s",
+            (phase, pct, scan_id, user_id),
+        )
+
+
 def get_scan(user_id: str, scan_id: int) -> dict | None:
     with get_db() as conn, conn.cursor() as cur:
         cur.execute(
@@ -322,10 +369,13 @@ def list_findings(
     severity: str | None = None,
     scanner: str | None = None,
     limit: int | None = None,
+    offset: int = 0,
 ) -> tuple[list[dict], int]:
     """This user's findings joined back to their scan/project, with optional
-    filters. Powers GET /api/findings. Returns (findings, total_count) --
-    total_count ignores `limit` so the caller can show "showing N of TOTAL"."""
+    filters and real pagination (limit + offset). Powers GET /api/findings.
+    Returns (findings, total_count) -- total_count ignores `limit`/`offset`
+    so the caller can show "showing X-Y of TOTAL" and page through the rest
+    instead of only ever seeing the first `limit` rows."""
     base_query = """
         FROM findings f
         JOIN scans s    ON s.id = f.scan_id
@@ -356,8 +406,9 @@ def list_findings(
             f"p.name AS project_name {base_query} ORDER BY f.id DESC"
         )
         if limit is not None:
-            select_query += " LIMIT %(limit)s"
+            select_query += " LIMIT %(limit)s OFFSET %(offset)s"
             params["limit"] = limit
+            params["offset"] = offset
 
         cur.execute(select_query, params)
         return [_row_to_finding_dict(r) for r in cur.fetchall()], total
@@ -382,6 +433,56 @@ def delete_all_findings(user_id: str, project_id: int | None = None, scanner: st
 
 
 # ── Compliance ──────────────────────────────────────────────────────
+
+def get_compliance_frameworks(user_id: str, project_id: int | None = None) -> list[dict]:
+    """
+    Powers GET /api/compliance's top-level score card(s). The frontend
+    expects an array of {name, score, controls_passed, controls_total} —
+    this used to just not exist (the route returned {"controls": [...]}, a
+    per-violated-control breakdown, under a completely different shape than
+    what the frontend's normalizeFramework()/complianceQuery() read, which
+    look for a "frameworks" key). That mismatch — not any actual scoring
+    logic — is why the compliance page always rendered its empty state
+    regardless of how much real, correctly-mapped data existed underneath.
+
+    "Compliant" here means: of the Annex A controls scanners can plausibly
+    map a finding to (see mappings/iso27001.py — 25 of them, not the full
+    93-control Annex A), how many currently have zero open findings against
+    them. This only covers what static/dependency/secret/IaC/DAST scanning
+    can actually observe — it is not a substitute for a real ISO 27001
+    audit, and should be labeled as such wherever it's displayed.
+    """
+    from mappings.iso27001 import ANNEX_A_CONTROLS
+
+    total_controls = len(ANNEX_A_CONTROLS)
+
+    query = """
+        SELECT DISTINCT f.iso27001_control
+        FROM findings f
+        JOIN scans s ON s.id = f.scan_id
+        WHERE f.user_id = %(uid)s AND f.iso27001_control IS NOT NULL
+    """
+    params: dict = {"uid": user_id}
+    if project_id is not None:
+        query += " AND s.project_id = %(project_id)s"
+        params["project_id"] = project_id
+
+    with get_db() as conn, conn.cursor() as cur:
+        cur.execute(query, params)
+        triggered = {r["iso27001_control"] for r in cur.fetchall()}
+
+    passed = max(0, total_controls - len(triggered))
+    score = round(passed / total_controls * 100) if total_controls else 100
+
+    return [
+        {
+            "name": "ISO/IEC 27001:2022",
+            "controls_passed": passed,
+            "controls_total": total_controls,
+            "score": score,
+        }
+    ]
+
 
 def get_compliance_summary(user_id: str, project_id: int | None = None) -> list[dict]:
     """Groups this user's findings by ISO/IEC 27001:2022 Annex A control,

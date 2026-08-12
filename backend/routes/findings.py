@@ -26,6 +26,7 @@ def get_findings(
     severity: str | None = Query(default=None, description="CRITICAL/HIGH/MEDIUM/LOW"),
     scanner: str | None = Query(default=None, description="semgrep/trivy/checkov/secrets"),
     limit: int | None = Query(default=None, description="Cap the number of rows returned, most recent first. Omit for no limit."),
+    offset: int = Query(default=0, ge=0, description="Rows to skip, for paging through results beyond `limit`."),
     user_id: str = Depends(get_current_user_id),
 ):
     findings, total = list_findings(
@@ -35,6 +36,7 @@ def get_findings(
         severity=severity,
         scanner=scanner,
         limit=limit,
+        offset=offset,
     )
     return {"count": len(findings), "total": total, "findings": findings}
 

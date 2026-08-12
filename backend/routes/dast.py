@@ -17,6 +17,7 @@ from services.db_service import (
     get_scan,
     insert_findings,
     list_findings,
+    update_scan_progress,
 )
 
 logger = logging.getLogger(__name__)
@@ -38,6 +39,14 @@ def _run_dast_scan_background(user_id: str, project_id: int, scan_id: int, targe
     (and therefore no Depends()) left once this is running on its own
     thread, so they're passed in explicitly instead.
     """
+    def on_progress(phase: str, pct: int | None) -> None:
+        # Best-effort — a progress update failing (e.g. a transient DB
+        # hiccup) must never take down the scan itself.
+        try:
+            update_scan_progress(user_id, scan_id, phase, pct)
+        except Exception:  # noqa: BLE001
+            logger.debug("Failed to write progress for scan #%s", scan_id, exc_info=True)
+
     try:
         with _zap_scan_lock:
             logger.info(
@@ -46,7 +55,11 @@ def _run_dast_scan_background(user_id: str, project_id: int, scan_id: int, targe
                 scan_id,
                 target_url,
             )
-            raw_alerts = run_zap_scan(target_url=target_url, scan_mode=scan_mode)
+            raw_alerts = run_zap_scan(
+                target_url=target_url,
+                scan_mode=scan_mode,
+                on_progress=on_progress,
+            )
 
         findings = normalize_zap_findings(raw_alerts)
         insert_findings(user_id, scan_id, project_id, findings)
@@ -62,7 +75,7 @@ def _run_dast_scan_background(user_id: str, project_id: int, scan_id: int, targe
         logger.error("DAST scan #%s failed: %s", scan_id, exc)
         finish_scan(user_id, scan_id, "failed", error_message=str(exc))
 
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — this runs unsupervised on a
         # background thread with no request/response cycle left to catch
         # it; anything unexpected must still mark the scan failed with a
         # reason, or it would sit as "running" forever.
@@ -113,7 +126,10 @@ def get_dast_scan_status(scan_id: int, user_id: str = Depends(get_current_user_i
     """
     Poll this while a scan is running. Short-lived request by design — safe
     to call every few seconds even over a flaky tunnel, unlike waiting on
-    the original POST for the scan's entire duration.
+    the original POST for the scan's entire duration. progress_phase /
+    progress_pct reflect real backend state (written by zap_runner.py as it
+    moves through spider/AJAX-spider/active-scan) — not a synthetic
+    frontend animation.
     """
     scan = get_scan(user_id, scan_id)
     if not scan or scan["scan_type"] != "dast":
@@ -125,6 +141,8 @@ def get_dast_scan_status(scan_id: int, user_id: str = Depends(get_current_user_i
         "status": status,
         "started_at": scan["started_at"],
         "finished_at": scan["finished_at"],
+        "progress_phase": scan.get("progress_phase"),
+        "progress_pct": scan.get("progress_pct"),
     }
 
     if status == "completed":

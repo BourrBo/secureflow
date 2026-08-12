@@ -7,7 +7,6 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from routes.auth import router as auth_router
 from routes.compliance import router as compliance_router
 from routes.container import router as container_router
 from routes.dast import router as dast_router
@@ -35,6 +34,17 @@ def on_startup():
 
 
 # CORS
+#
+# Lovable serves this project from more than one origin pattern, and which
+# one you're on can change without warning: the published domain
+# (secureflow-laati.lovable.app), a slug-based preview
+# (preview--secureflow-laati.lovable.app), and a UUID-based preview
+# (id-preview--<project-id>.lovable.app) have all shown up. CORSMiddleware
+# rejects a preflight from any origin not explicitly allowed with a hard
+# 400 — not a silent "missing header" — so a hardcoded list of exact
+# strings breaks the instant Lovable serves from a variant that isn't on
+# it, which is exactly what happened here. allow_origin_regex covers every
+# variant of *this* project's domain instead of enumerating them by hand.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -42,16 +52,15 @@ app.add_middleware(
         "http://127.0.0.1:3000",
         "http://localhost:8080",
         "http://192.168.1.4:8080",
-        "https://id-preview--3418111a-32b7-4c0f-8a4f-6ea92ef21a06.lovable.app",
-        "https://secureflow-laati.lovable.app",
     ],
+    allow_origin_regex=r"https://([a-zA-Z0-9-]+--)?secureflow-laati\.lovable\.app"
+                        r"|https://id-preview--3418111a-32b7-4c0f-8a4f-6ea92ef21a06\.lovable\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # Routes
-app.include_router(auth_router)
 app.include_router(sast_router)
 app.include_router(secrets_router)
 app.include_router(reports_router)
