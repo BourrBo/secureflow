@@ -44,7 +44,7 @@ def _run_dast_scan_background(user_id: str, project_id: int, scan_id: int, targe
         # hiccup) must never take down the scan itself.
         try:
             update_scan_progress(user_id, scan_id, phase, pct)
-        except Exception:  # noqa: BLE001
+        except Exception:
             logger.debug("Failed to write progress for scan #%s", scan_id, exc_info=True)
 
     try:
@@ -75,7 +75,7 @@ def _run_dast_scan_background(user_id: str, project_id: int, scan_id: int, targe
         logger.error("DAST scan #%s failed: %s", scan_id, exc)
         finish_scan(user_id, scan_id, "failed", error_message=str(exc))
 
-    except Exception as exc:  # noqa: BLE001 — this runs unsupervised on a
+    except Exception as exc:
         # background thread with no request/response cycle left to catch
         # it; anything unexpected must still mark the scan failed with a
         # reason, or it would sit as "running" forever.
