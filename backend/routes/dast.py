@@ -47,6 +47,31 @@ def _run_dast_scan_background(user_id: str, project_id: int, scan_id: int, targe
         except Exception:
             logger.debug("Failed to write progress for scan #%s", scan_id, exc_info=True)
 
+    def _safe_finish_scan(status: str, error_message: str | None = None) -> None:
+        # finish_scan() itself can fail (e.g. the same transient DB issue
+        # that caused the scan to fail in the first place — see scan #15 in
+        # server.log, where finish_scan("failed", ...) threw a SECOND
+        # unhandled OperationalError and killed this background thread
+        # before the scan could even be marked "failed"). That left the
+        # scan permanently stuck on "running" with no findings and no error
+        # message — the frontend would poll it forever. db_service.get_db()
+        # now retries transient failures on its own (see services/db_service
+        # .py), so this should rarely be needed, but this call must never be
+        # allowed to raise: it is the last thing standing between a failed
+        # scan and one that just silently disappears.
+        try:
+            finish_scan(user_id, scan_id, status, error_message=error_message)
+        except Exception:
+            logger.critical(
+                "Could not mark DAST scan #%s as '%s' in the DB — it will "
+                "stay stuck on 'running' until manually corrected. "
+                "Underlying scan error (if any): %s",
+                scan_id,
+                status,
+                error_message,
+                exc_info=True,
+            )
+
     try:
         with _zap_scan_lock:
             logger.info(
@@ -63,7 +88,7 @@ def _run_dast_scan_background(user_id: str, project_id: int, scan_id: int, targe
 
         findings = normalize_zap_findings(raw_alerts)
         insert_findings(user_id, scan_id, project_id, findings)
-        finish_scan(user_id, scan_id, "completed")
+        _safe_finish_scan("completed")
 
         logger.info(
             "DAST scan #%s completed successfully with %d findings",
@@ -73,14 +98,14 @@ def _run_dast_scan_background(user_id: str, project_id: int, scan_id: int, targe
 
     except ZapScanError as exc:
         logger.error("DAST scan #%s failed: %s", scan_id, exc)
-        finish_scan(user_id, scan_id, "failed", error_message=str(exc))
+        _safe_finish_scan("failed", error_message=str(exc))
 
     except Exception as exc:
         # background thread with no request/response cycle left to catch
         # it; anything unexpected must still mark the scan failed with a
         # reason, or it would sit as "running" forever.
         logger.exception("Unexpected DAST error on scan #%s", scan_id)
-        finish_scan(user_id, scan_id, "failed", error_message=str(exc))
+        _safe_finish_scan("failed", error_message=str(exc))
 
 
 @router.post("/api/dast/scan")

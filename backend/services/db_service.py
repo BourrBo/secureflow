@@ -23,11 +23,13 @@ import json
 import logging
 import os
 import re
+import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
 
 import psycopg2
 import psycopg2.extras
+import psycopg2.pool
 
 from utils.severity import normalize_severity
 
@@ -38,20 +40,108 @@ DATABASE_URL = os.environ.get("DATABASE_URL")
 VALID_SCAN_TYPES = {"sast", "sca", "iac", "secrets", "container", "dast"}
 VALID_SCAN_STATUS = {"running", "completed", "failed"}
 
+# --- Connection pool + retry ------------------------------------------------
+#
+# A DAST scan can run for many minutes to hours, and during that window
+# on_progress() writes to the DB every few seconds (see routes/dast.py).
+# The old code called psycopg2.connect() fresh on every single one of those
+# calls, which means every one of those calls also did a fresh DNS lookup
+# for the Supabase pooler hostname. That's what actually happened on scan
+# #15 (see server.log): a single transient DNS/network hiccup partway
+# through an 8-minute scan hit insert_findings() at the very end, threw
+# psycopg2.OperationalError, and then hit AGAIN inside the except-block's
+# own call to finish_scan() — so the scan's results were lost AND the scan
+# was left stuck on "running" forever instead of being marked "failed".
+#
+# Two changes fix this:
+#   1. A small persistent connection pool, so most calls reuse an already-
+#      established connection instead of re-resolving DNS and re-connecting
+#      every time.
+#   2. Retry-with-backoff around acquiring a connection, so a single
+#      transient blip (the DNS lookup momentarily failing, a dropped idle
+#      TCP connection, etc.) doesn't take down an entire scan's worth of
+#      results.
+_POOL: psycopg2.pool.ThreadedConnectionPool | None = None
+
+_CONNECT_MAX_ATTEMPTS = 4
+_CONNECT_BACKOFF_SECS = (1, 2, 5)  # delay before attempts 2, 3, 4
+
+# TCP keepalives so a connection that's gone idle for a while (e.g. between
+# progress writes during a long-running active scan) has dead/dropped
+# sockets detected and recycled instead of silently hanging or erroring out
+# the next time it's used.
+_CONNECT_KWARGS = dict(
+    cursor_factory=psycopg2.extras.RealDictCursor,
+    connect_timeout=10,
+    keepalives=1,
+    keepalives_idle=30,
+    keepalives_interval=10,
+    keepalives_count=5,
+)
+
+
+def _get_pool() -> psycopg2.pool.ThreadedConnectionPool:
+    global _POOL
+    if _POOL is None:
+        if not DATABASE_URL:
+            raise RuntimeError(
+                "DATABASE_URL is not set. Copy the Postgres connection string "
+                "from Supabase (Project Settings -> Database -> Connection "
+                "string -> URI, use the 'Session pooler' one for a long-running "
+                "backend like this) into your .env as DATABASE_URL."
+            )
+        _POOL = psycopg2.pool.ThreadedConnectionPool(
+            minconn=1,
+            maxconn=8,
+            dsn=DATABASE_URL,
+            **_CONNECT_KWARGS,
+        )
+    return _POOL
+
+
+def _get_conn_with_retry():
+    """Borrows a connection from the pool, retrying transient failures
+    (DNS hiccups, connection resets, etc.) with backoff before giving up."""
+    pool = _get_pool()
+    last_exc: Exception | None = None
+    for attempt in range(1, _CONNECT_MAX_ATTEMPTS + 1):
+        try:
+            conn = pool.getconn()
+            # A pooled connection can go stale while sitting idle (the
+            # remote end closed it, a NAT/firewall dropped it, etc.) —
+            # a cheap SELECT 1 here confirms it's actually usable before
+            # handing it back, and discards+retries if not.
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1")
+            return conn
+        except Exception as exc:  # noqa: BLE001
+            last_exc = exc
+            try:
+                pool.putconn(conn, close=True)  # type: ignore[possibly-undefined]
+            except Exception:
+                logger.debug("Failed to discard a broken pooled DB connection", exc_info=True)
+            if attempt < _CONNECT_MAX_ATTEMPTS:
+                delay = _CONNECT_BACKOFF_SECS[min(attempt - 1, len(_CONNECT_BACKOFF_SECS) - 1)]
+                logger.warning(
+                    "DB connection attempt %d/%d failed (%s) — retrying in %ds",
+                    attempt,
+                    _CONNECT_MAX_ATTEMPTS,
+                    exc,
+                    delay,
+                )
+                time.sleep(delay)
+    logger.error(
+        "DB connection failed after %d attempts: %s", _CONNECT_MAX_ATTEMPTS, last_exc
+    )
+    raise last_exc
+
 
 @contextmanager
 def get_db():
-    """Yields a psycopg2 connection with dict-like row access (RealDictCursor),
-    matching the short-lived-connection style already used for git clones
-    and zip extraction in this codebase. Opens/closes per call."""
-    if not DATABASE_URL:
-        raise RuntimeError(
-            "DATABASE_URL is not set. Copy the Postgres connection string "
-            "from Supabase (Project Settings -> Database -> Connection "
-            "string -> URI, use the 'Session pooler' one for a long-running "
-            "backend like this) into your .env as DATABASE_URL."
-        )
-    conn = psycopg2.connect(DATABASE_URL, cursor_factory=psycopg2.extras.RealDictCursor)
+    """Yields a psycopg2 connection with dict-like row access (RealDictCursor).
+    Backed by a small persistent pool with connect-retry (see above) instead
+    of opening a brand-new connection — and re-resolving DNS — on every call."""
+    conn = _get_conn_with_retry()
     try:
         yield conn
         conn.commit()
@@ -59,7 +149,7 @@ def get_db():
         conn.rollback()
         raise
     finally:
-        conn.close()
+        _get_pool().putconn(conn)
 
 
 def init_db():

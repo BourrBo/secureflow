@@ -1,10 +1,46 @@
+import contextlib
+import ctypes
 import logging
+import platform
 import time
 
 from config.dast_profiles import SCAN_PROFILES
 from utils.zap_utils import ensure_zap_reachable, get_zap_config
 
 logger = logging.getLogger(__name__)
+
+# Windows sleep/standby was observed killing ZAP mid-scan (the machine
+# suspends, ZAP's process and/or its network connections don't survive
+# that, and the scan just hangs or dies with no clean error). This asks
+# Windows to keep the system (and, since a DAST scan is all about network
+# I/O to the target, the display doesn't matter but the system+network
+# path does) awake for the duration of a scan, then explicitly releases
+# that request afterwards. No-op on any non-Windows OS.
+_ES_CONTINUOUS = 0x80000000
+_ES_SYSTEM_REQUIRED = 0x00000001
+
+
+@contextlib.contextmanager
+def _prevent_windows_sleep():
+    if platform.system() != "Windows":
+        yield
+        return
+    try:
+        ctypes.windll.kernel32.SetThreadExecutionState(  # type: ignore[attr-defined]
+            _ES_CONTINUOUS | _ES_SYSTEM_REQUIRED
+        )
+        logger.info("Windows sleep suspended for the duration of this DAST scan")
+    except Exception:
+        # never worth failing the scan over.
+        logger.debug("Could not suspend Windows sleep for this scan", exc_info=True)
+    try:
+        yield
+    finally:
+        try:
+            ctypes.windll.kernel32.SetThreadExecutionState(_ES_CONTINUOUS)  # type: ignore[attr-defined]
+            logger.info("Windows sleep restored to normal after this DAST scan")
+        except Exception:
+            logger.debug("Could not restore normal Windows sleep behavior", exc_info=True)
 
 # A genuine "let it fully finish" scan has no natural time limit — a large
 # real-world site can legitimately take hours of active scanning. This is
@@ -373,28 +409,29 @@ def run_zap_scan(
 
     _maximize_scan_thoroughness(zap)
 
-    logger.info("STEP 8")
-    _run_spider(zap, target_url, on_progress=on_progress)
+    with _prevent_windows_sleep():
+        logger.info("STEP 8")
+        _run_spider(zap, target_url, on_progress=on_progress)
 
-    logger.info("STEP 9")
-    _wait_for_passive_scan(zap, on_progress=on_progress)
-
-    logger.info("STEP 10")
-
-    if enable_ajax_spider:
-        logger.info("AJAX Spider enabled for this profile")
-        _run_ajax_spider(zap, target_url, on_progress=on_progress)
+        logger.info("STEP 9")
         _wait_for_passive_scan(zap, on_progress=on_progress)
 
-    if enable_active_scan:
-        logger.info("Active Scan enabled for this profile")
-        _run_active_scan(zap, target_url, on_progress=on_progress)
-        _wait_for_passive_scan(zap, on_progress=on_progress)
-    else:
-        logger.info(
-            "Skipping Active Scan because it is disabled for '%s' profile",
-            scan_mode,
-        )
+        logger.info("STEP 10")
+
+        if enable_ajax_spider:
+            logger.info("AJAX Spider enabled for this profile")
+            _run_ajax_spider(zap, target_url, on_progress=on_progress)
+            _wait_for_passive_scan(zap, on_progress=on_progress)
+
+        if enable_active_scan:
+            logger.info("Active Scan enabled for this profile")
+            _run_active_scan(zap, target_url, on_progress=on_progress)
+            _wait_for_passive_scan(zap, on_progress=on_progress)
+        else:
+            logger.info(
+                "Skipping Active Scan because it is disabled for '%s' profile",
+                scan_mode,
+            )
 
     logger.info("Collecting alerts from ZAP")
 
