@@ -12,7 +12,11 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from services.auth_service import get_current_user_id
-from services.db_service import delete_all_findings, delete_all_workspace_data, list_findings
+from services.db_service import (
+    delete_all_findings,
+    delete_all_workspace_data,
+    list_findings,
+)
 
 router = APIRouter(prefix="/api/findings", tags=["findings"])
 
