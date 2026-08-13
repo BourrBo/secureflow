@@ -538,6 +538,42 @@ def delete_all_findings(user_id: str, project_id: int | None = None, scanner: st
         return cur.rowcount
 
 
+def delete_all_workspace_data(user_id: str) -> dict:
+    """Destructive workspace reset for the authenticated user.
+
+    Deletes all findings, scans, and projects owned by this user. Deletion is
+    performed in dependency order so scan/project references are removed only
+    after their child findings are gone. The function runs inside the normal
+    ``get_db()`` transaction, so any database error rolls the whole reset back.
+
+    Returns counts of deleted rows.
+    """
+    with get_db() as conn, conn.cursor() as cur:
+        cur.execute(
+            "DELETE FROM findings WHERE user_id = %s",
+            (user_id,),
+        )
+        findings_deleted = cur.rowcount
+
+        cur.execute(
+            "DELETE FROM scans WHERE user_id = %s",
+            (user_id,),
+        )
+        scans_deleted = cur.rowcount
+
+        cur.execute(
+            "DELETE FROM projects WHERE user_id = %s",
+            (user_id,),
+        )
+        projects_deleted = cur.rowcount
+
+    return {
+        "findings": findings_deleted,
+        "scans": scans_deleted,
+        "projects": projects_deleted,
+    }
+
+
 # ── Compliance ──────────────────────────────────────────────────────
 
 def get_compliance_frameworks(user_id: str, project_id: int | None = None) -> list[dict]:

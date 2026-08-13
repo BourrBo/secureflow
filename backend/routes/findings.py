@@ -12,7 +12,7 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from services.auth_service import get_current_user_id
-from services.db_service import delete_all_findings, list_findings
+from services.db_service import delete_all_findings, delete_all_workspace_data, list_findings
 
 router = APIRouter(prefix="/api/findings", tags=["findings"])
 
@@ -62,3 +62,27 @@ def clear_findings(
 
     logger.info("Cleared %d findings (project_id=%s, scanner=%s)", deleted, project_id, scanner)
     return {"deleted": deleted}
+
+@router.delete("/all")
+def clear_all_workspace_data(
+    user_id: str = Depends(get_current_user_id),
+):
+    """Completely reset the authenticated user's SecureFlow workspace.
+
+    Deletes findings first, then their scans, then projects. The operation is
+    scoped to the authenticated user and runs inside the database transaction.
+    """
+    try:
+        deleted = delete_all_workspace_data(user_id)
+    except Exception as exc:
+        logger.exception("Failed to clear all workspace data")
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    logger.info(
+        "Workspace reset for user %s: findings=%d scans=%d projects=%d",
+        user_id,
+        deleted["findings"],
+        deleted["scans"],
+        deleted["projects"],
+    )
+    return {"status": "cleared", **deleted}
