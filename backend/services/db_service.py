@@ -458,6 +458,7 @@ def list_findings(
     scan_id: int | None = None,
     severity: str | None = None,
     scanner: str | None = None,
+    q: str | None = None,
     limit: int | None = None,
     offset: int = 0,
 ) -> tuple[list[dict], int]:
@@ -465,7 +466,13 @@ def list_findings(
     filters and real pagination (limit + offset). Powers GET /api/findings.
     Returns (findings, total_count) -- total_count ignores `limit`/`offset`
     so the caller can show "showing X-Y of TOTAL" and page through the rest
-    instead of only ever seeing the first `limit` rows."""
+    instead of only ever seeing the first `limit` rows.
+
+    `q` is a free-text search matched server-side against the finding's id,
+    title, project name, and scanner/module -- across the WHOLE result set,
+    not just whatever page happens to be loaded. Previously the frontend
+    only filtered the 25 rows already on the current page, so searching for
+    a term that existed on a later page silently returned nothing."""
     base_query = """
         FROM findings f
         JOIN scans s    ON s.id = f.scan_id
@@ -486,6 +493,15 @@ def list_findings(
     if scanner is not None:
         base_query += " AND f.scanner = %(scanner)s"
         params["scanner"] = scanner
+    if q:
+        base_query += """ AND (
+            f.title ILIKE %(q)s
+            OR p.name ILIKE %(q)s
+            OR f.scanner ILIKE %(q)s
+            OR s.scan_type ILIKE %(q)s
+            OR CAST(f.id AS TEXT) ILIKE %(q)s
+        )"""
+        params["q"] = f"%{q.strip()}%"
 
     with get_db() as conn, conn.cursor() as cur:
         cur.execute(f"SELECT COUNT(*) AS total {base_query}", params)
@@ -635,4 +651,135 @@ def get_findings_trend(user_id: str, days: int = 7) -> list[dict]:
             """,
             {"uid": user_id, "days": days},
         )
+        return [dict(r) for r in cur.fetchall()]
+
+# ── API keys (CI/CD machine-to-machine auth) ────────────────────────
+#
+# A key is shown to the user exactly once, at creation time. Only its
+# SHA-256 hash is ever persisted -- same principle as a password. The
+# stored `key_prefix` (first 8 chars) lets the Settings UI show "which
+# key is which" without ever displaying the full secret again.
+
+def create_api_key(
+    user_id: str,
+    name: str,
+    key_prefix: str,
+    key_hash: str,
+    project_id: int | None = None,
+) -> dict:
+    """Persists a newly generated key's hash (never the raw key itself --
+    that's returned to the caller once by the route and discarded here)."""
+    with get_db() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO api_keys (user_id, name, key_prefix, key_hash, project_id)
+            VALUES (%(uid)s, %(name)s, %(prefix)s, %(hash)s, %(pid)s)
+            RETURNING id, name, key_prefix, project_id, created_at, last_used_at, revoked_at
+            """,
+            {"uid": user_id, "name": name, "prefix": key_prefix, "hash": key_hash, "pid": project_id},
+        )
+        return dict(cur.fetchone())
+
+
+def list_api_keys(user_id: str) -> list[dict]:
+    """Never returns key_hash -- only the prefix, enough to identify a key
+    without ever re-exposing the secret."""
+    with get_db() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT id, name, key_prefix, project_id, created_at, last_used_at, revoked_at
+            FROM api_keys
+            WHERE user_id = %(uid)s
+            ORDER BY created_at DESC
+            """,
+            {"uid": user_id},
+        )
+        return [dict(r) for r in cur.fetchall()]
+
+
+def revoke_api_key(user_id: str, key_id: int) -> bool:
+    with get_db() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            UPDATE api_keys SET revoked_at = now()
+            WHERE id = %(kid)s AND user_id = %(uid)s AND revoked_at IS NULL
+            """,
+            {"kid": key_id, "uid": user_id},
+        )
+        return cur.rowcount > 0
+
+
+def get_user_id_for_api_key(key_hash: str) -> str | None:
+    """Looks up an active (non-revoked) key by its hash and returns the
+    owning user_id, or None if the key doesn't exist / was revoked. Also
+    stamps last_used_at so the Settings UI can show real usage, not just
+    creation date."""
+    with get_db() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            UPDATE api_keys SET last_used_at = now()
+            WHERE key_hash = %(hash)s AND revoked_at IS NULL
+            RETURNING user_id
+            """,
+            {"hash": key_hash},
+        )
+        row = cur.fetchone()
+        return str(row["user_id"]) if row else None
+
+
+# ── CI/CD gate ───────────────────────────────────────────────────────
+
+def record_gate_run(
+    user_id: str,
+    project_id: int,
+    fail_on: str,
+    passed: bool,
+    blocking_count: int,
+    total_findings: int,
+    scan_id: int | None = None,
+    commit_sha: str | None = None,
+    triggered_by: str | None = None,
+) -> dict:
+    with get_db() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO gate_runs
+                (user_id, project_id, scan_id, fail_on, passed, blocking_count,
+                 total_findings, commit_sha, triggered_by)
+            VALUES
+                (%(uid)s, %(pid)s, %(sid)s, %(fail_on)s, %(passed)s, %(blocking)s,
+                 %(total)s, %(sha)s, %(by)s)
+            RETURNING id, project_id, scan_id, fail_on, passed, blocking_count,
+                      total_findings, commit_sha, triggered_by, created_at
+            """,
+            {
+                "uid": user_id,
+                "pid": project_id,
+                "sid": scan_id,
+                "fail_on": fail_on,
+                "passed": passed,
+                "blocking": blocking_count,
+                "total": total_findings,
+                "sha": commit_sha,
+                "by": triggered_by,
+            },
+        )
+        return dict(cur.fetchone())
+
+
+def list_gate_runs(user_id: str, project_id: int | None = None, limit: int = 50) -> list[dict]:
+    query = """
+        SELECT g.*, p.name AS project_name
+        FROM gate_runs g
+        JOIN projects p ON p.id = g.project_id
+        WHERE g.user_id = %(uid)s
+    """
+    params: dict = {"uid": user_id, "limit": limit}
+    if project_id is not None:
+        query += " AND g.project_id = %(pid)s"
+        params["pid"] = project_id
+    query += " ORDER BY g.created_at DESC LIMIT %(limit)s"
+
+    with get_db() as conn, conn.cursor() as cur:
+        cur.execute(query, params)
         return [dict(r) for r in cur.fetchall()]

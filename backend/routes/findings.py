@@ -25,6 +25,7 @@ def get_findings(
     scan_id: int | None = Query(default=None),
     severity: str | None = Query(default=None, description="CRITICAL/HIGH/MEDIUM/LOW"),
     scanner: str | None = Query(default=None, description="semgrep/trivy/checkov/secrets"),
+    q: str | None = Query(default=None, description="Free-text search across id, title, project name, and scanner -- matched server-side across ALL findings, not just the current page."),
     limit: int | None = Query(default=None, description="Cap the number of rows returned, most recent first. Omit for no limit."),
     offset: int = Query(default=0, ge=0, description="Rows to skip, for paging through results beyond `limit`."),
     user_id: str = Depends(get_current_user_id),
@@ -35,6 +36,7 @@ def get_findings(
         scan_id=scan_id,
         severity=severity,
         scanner=scanner,
+        q=q,
         limit=limit,
         offset=offset,
     )

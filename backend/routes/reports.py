@@ -8,6 +8,7 @@ POST /api/reports/pdf
     table + Annex A control reference appendix).
 """
 
+import json
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Response
@@ -17,6 +18,7 @@ from models.finding import Finding
 from services.auth_service import get_current_user_id
 from services.db_service import get_project, get_scan, list_findings, list_scans
 from services.report_service import generate_pdf_report
+from services.sarif_service import findings_to_sarif
 
 router = APIRouter()
 
@@ -107,5 +109,42 @@ def regenerate_report(scan_id: int, user_id: str = Depends(get_current_user_id))
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/api/reports/{scan_id}/sarif")
+def report_sarif(scan_id: int, user_id: str = Depends(get_current_user_id)):
+    """SARIF 2.1.0 export of a past scan's findings -- the format GitHub
+    Code Scanning / GitLab natively render as inline PR annotations."""
+    scan = get_scan(user_id, scan_id)
+    if not scan:
+        raise HTTPException(status_code=404, detail="Scan not found")
+
+    findings, _total = list_findings(user_id, scan_id=scan_id)
+    sarif = findings_to_sarif(findings)
+    filename = f"secureflow_scan{scan_id}.sarif"
+
+    return Response(
+        content=json.dumps(sarif),
+        media_type="application/sarif+json",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/api/reports/{scan_id}/json")
+def report_json(scan_id: int, user_id: str = Depends(get_current_user_id)):
+    """Raw JSON export of a past scan's findings -- for teams that want
+    to pipe results into their own tooling instead of PDF/SARIF."""
+    scan = get_scan(user_id, scan_id)
+    if not scan:
+        raise HTTPException(status_code=404, detail="Scan not found")
+
+    findings, _total = list_findings(user_id, scan_id=scan_id)
+    filename = f"secureflow_scan{scan_id}.json"
+
+    return Response(
+        content=json.dumps({"scan": scan, "findings": findings}, default=str),
+        media_type="application/json",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )

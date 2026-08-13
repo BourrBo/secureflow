@@ -7,10 +7,12 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from routes.api_keys import router as api_keys_router
 from routes.compliance import router as compliance_router
 from routes.container import router as container_router
 from routes.dast import router as dast_router
 from routes.findings import router as findings_router
+from routes.gate import router as gate_router
 from routes.projects import router as projects_router
 from routes.reports import router as reports_router
 from routes.sast import router as sast_router
@@ -70,6 +72,8 @@ app.include_router(dast_router)
 app.include_router(findings_router)
 app.include_router(projects_router)
 app.include_router(compliance_router)
+app.include_router(api_keys_router)
+app.include_router(gate_router)
 
 
 @app.get("/")

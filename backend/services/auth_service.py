@@ -27,16 +27,34 @@ personal-email account can't reach any API route even if it somehow got a
 valid Supabase session (e.g. signed up before this policy existed).
 """
 
+import hashlib
 import logging
 import os
+import secrets
 
 import httpx
-from fastapi import Depends, HTTPException
+from fastapi import Depends, Header, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from utils.business_email import is_business_email
 
 logger = logging.getLogger(__name__)
+
+API_KEY_PREFIX = "sfk_"  # "SecureFlow Key" -- lets a leaked key be recognized at a glance
+
+
+def generate_api_key() -> tuple[str, str, str]:
+    """Generates a new raw API key + what gets persisted for it.
+    Returns (raw_key, key_prefix, key_hash). The raw key is returned to the
+    caller exactly once (at creation) and is never stored anywhere -- only
+    its SHA-256 hash is, so a database leak can't be used to authenticate."""
+    raw = API_KEY_PREFIX + secrets.token_urlsafe(32)
+    key_hash = hashlib.sha256(raw.encode("utf-8")).hexdigest()
+    return raw, raw[: len(API_KEY_PREFIX) + 6], key_hash
+
+
+def hash_api_key(raw_key: str) -> str:
+    return hashlib.sha256(raw_key.encode("utf-8")).hexdigest()
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "").rstrip("/")
 SUPABASE_ANON_KEY = os.environ.get("SUPABASE_ANON_KEY", "")
@@ -86,12 +104,30 @@ def _fetch_supabase_user(token: str) -> dict:
 
 def get_current_user_id(
     credentials: HTTPAuthorizationCredentials | None = Depends(_bearer_scheme),
+    x_api_key: str | None = Header(default=None, alias="X-API-Key"),
 ) -> str:
     """FastAPI dependency — use as `user_id: str = Depends(get_current_user_id)`
-    on any route that requires a signed-in user. Returns the caller's
-    Supabase auth UUID (as a string) on success, raises HTTPException(401)
-    if not signed in / session invalid, or HTTPException(403) if the
-    account's email isn't a business email."""
+    on any route that requires an authenticated caller. Accepts EITHER:
+      - a Supabase session token as `Authorization: Bearer <token>` (the
+        dashboard's own auth), or
+      - a SecureFlow API key as `X-API-Key: sfk_...` (for CI/CD callers
+        that can't do an interactive login -- see services.db_service's
+        api_keys table).
+    Returns the caller's Supabase auth UUID (as a string) on success,
+    raises HTTPException(401) if neither is present/valid, or
+    HTTPException(403) if a Bearer-token account's email isn't a business
+    email (the business-email policy does not apply to API keys, since
+    those were already issued to a validated account)."""
+    if x_api_key:
+        # Import here, not at module load, to avoid a service-layer
+        # circular import between auth_service and db_service.
+        from services.db_service import get_user_id_for_api_key
+
+        user_id = get_user_id_for_api_key(hash_api_key(x_api_key))
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Invalid or revoked API key")
+        return user_id
+
     if credentials is None or not credentials.credentials:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
