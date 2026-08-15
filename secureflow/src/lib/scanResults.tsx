@@ -8,6 +8,7 @@ type ScanResultsContextValue = {
   get: (module: ModuleKey) => StoredResult | null;
   set: (module: ModuleKey, result: ScanResult) => void;
   reset: (module: ModuleKey) => void;
+  entries: Array<{ module: ModuleKey } & StoredResult>;
 };
 
 const ScanResultsContext = createContext<ScanResultsContextValue | null>(null);
@@ -70,9 +71,25 @@ export function ScanResultsProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  const value = useMemo(() => ({ get, set, reset }), [get, set, reset]);
+  const entries = useMemo(
+    () =>
+      (Object.entries(data) as Array<[ModuleKey, StoredResult]>).map(([module, stored]) => ({
+        module,
+        ...stored,
+      })),
+    [data],
+  );
+
+  const value = useMemo(() => ({ get, set, reset, entries }), [get, set, reset, entries]);
 
   return <ScanResultsContext.Provider value={value}>{children}</ScanResultsContext.Provider>;
+}
+
+/** Full context — used by providers/consumers that need every module. */
+export function useScanResults(): ScanResultsContextValue {
+  const ctx = useContext(ScanResultsContext);
+  if (!ctx) throw new Error("useScanResults must be used inside <ScanResultsProvider>");
+  return ctx;
 }
 
 /** Convenience hook for a single module — mirrors the shape of the old

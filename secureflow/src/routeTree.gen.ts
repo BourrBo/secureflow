@@ -22,6 +22,7 @@ import { Route as DashboardScaRouteImport } from './routes/dashboard.sca'
 import { Route as DashboardSastRouteImport } from './routes/dashboard.sast'
 import { Route as DashboardReportsRouteImport } from './routes/dashboard.reports'
 import { Route as DashboardProjectsRouteImport } from './routes/dashboard.projects'
+import { Route as DashboardPipelineRouteImport } from './routes/dashboard.pipeline'
 import { Route as DashboardIacRouteImport } from './routes/dashboard.iac'
 import { Route as DashboardFindingsRouteImport } from './routes/dashboard.findings'
 import { Route as DashboardDastRouteImport } from './routes/dashboard.dast'
@@ -93,6 +94,11 @@ const DashboardProjectsRoute = DashboardProjectsRouteImport.update({
   path: '/projects',
   getParentRoute: () => DashboardRoute,
 } as any)
+const DashboardPipelineRoute = DashboardPipelineRouteImport.update({
+  id: '/pipeline',
+  path: '/pipeline',
+  getParentRoute: () => DashboardRoute,
+} as any)
 const DashboardIacRoute = DashboardIacRouteImport.update({
   id: '/iac',
   path: '/iac',
@@ -131,6 +137,7 @@ export interface FileRoutesByFullPath {
   '/dashboard/dast': typeof DashboardDastRoute
   '/dashboard/findings': typeof DashboardFindingsRoute
   '/dashboard/iac': typeof DashboardIacRoute
+  '/dashboard/pipeline': typeof DashboardPipelineRoute
   '/dashboard/projects': typeof DashboardProjectsRoute
   '/dashboard/reports': typeof DashboardReportsRoute
   '/dashboard/sast': typeof DashboardSastRoute
@@ -150,6 +157,7 @@ export interface FileRoutesByTo {
   '/dashboard/dast': typeof DashboardDastRoute
   '/dashboard/findings': typeof DashboardFindingsRoute
   '/dashboard/iac': typeof DashboardIacRoute
+  '/dashboard/pipeline': typeof DashboardPipelineRoute
   '/dashboard/projects': typeof DashboardProjectsRoute
   '/dashboard/reports': typeof DashboardReportsRoute
   '/dashboard/sast': typeof DashboardSastRoute
@@ -171,6 +179,7 @@ export interface FileRoutesById {
   '/dashboard/dast': typeof DashboardDastRoute
   '/dashboard/findings': typeof DashboardFindingsRoute
   '/dashboard/iac': typeof DashboardIacRoute
+  '/dashboard/pipeline': typeof DashboardPipelineRoute
   '/dashboard/projects': typeof DashboardProjectsRoute
   '/dashboard/reports': typeof DashboardReportsRoute
   '/dashboard/sast': typeof DashboardSastRoute
@@ -193,6 +202,7 @@ export interface FileRouteTypes {
     | '/dashboard/dast'
     | '/dashboard/findings'
     | '/dashboard/iac'
+    | '/dashboard/pipeline'
     | '/dashboard/projects'
     | '/dashboard/reports'
     | '/dashboard/sast'
@@ -212,6 +222,7 @@ export interface FileRouteTypes {
     | '/dashboard/dast'
     | '/dashboard/findings'
     | '/dashboard/iac'
+    | '/dashboard/pipeline'
     | '/dashboard/projects'
     | '/dashboard/reports'
     | '/dashboard/sast'
@@ -232,6 +243,7 @@ export interface FileRouteTypes {
     | '/dashboard/dast'
     | '/dashboard/findings'
     | '/dashboard/iac'
+    | '/dashboard/pipeline'
     | '/dashboard/projects'
     | '/dashboard/reports'
     | '/dashboard/sast'
@@ -343,6 +355,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DashboardProjectsRouteImport
       parentRoute: typeof DashboardRoute
     }
+    '/dashboard/pipeline': {
+      id: '/dashboard/pipeline'
+      path: '/pipeline'
+      fullPath: '/dashboard/pipeline'
+      preLoaderRoute: typeof DashboardPipelineRouteImport
+      parentRoute: typeof DashboardRoute
+    }
     '/dashboard/iac': {
       id: '/dashboard/iac'
       path: '/iac'
@@ -387,6 +406,7 @@ interface DashboardRouteChildren {
   DashboardDastRoute: typeof DashboardDastRoute
   DashboardFindingsRoute: typeof DashboardFindingsRoute
   DashboardIacRoute: typeof DashboardIacRoute
+  DashboardPipelineRoute: typeof DashboardPipelineRoute
   DashboardProjectsRoute: typeof DashboardProjectsRoute
   DashboardReportsRoute: typeof DashboardReportsRoute
   DashboardSastRoute: typeof DashboardSastRoute
@@ -402,6 +422,7 @@ const DashboardRouteChildren: DashboardRouteChildren = {
   DashboardDastRoute: DashboardDastRoute,
   DashboardFindingsRoute: DashboardFindingsRoute,
   DashboardIacRoute: DashboardIacRoute,
+  DashboardPipelineRoute: DashboardPipelineRoute,
   DashboardProjectsRoute: DashboardProjectsRoute,
   DashboardReportsRoute: DashboardReportsRoute,
   DashboardSastRoute: DashboardSastRoute,
@@ -426,3 +447,13 @@ const rootRouteChildren: RootRouteChildren = {
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
+
+import type { getRouter } from './router.tsx'
+import type { startInstance } from './start.ts'
+declare module '@tanstack/react-start' {
+  interface Register {
+    ssr: true
+    router: Awaited<ReturnType<typeof getRouter>>
+    config: Awaited<ReturnType<typeof startInstance.getOptions>>
+  }
+}

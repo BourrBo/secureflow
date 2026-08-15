@@ -1,14 +1,265 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { PageHeader, Panel } from "@/components/dashboard/primitives";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { TableSkeleton, EmptyState, ErrorState } from "@/components/dashboard/primitives";
+import { apiKeysQuery, projectsQuery } from "@/lib/queries";
+import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { API_URL } from "@/lib/api";
+import { AlertTriangle, Copy, KeyRound, Plus } from "lucide-react";
 
 export const Route = createFileRoute("/dashboard/settings")({ component: Settings });
+
+const ALL_PROJECTS = "__all__";
+
+function fmtDate(v?: string | null) {
+  if (!v) return "Never";
+  const d = new Date(v);
+  return Number.isNaN(d.getTime()) ? "—" : d.toLocaleDateString();
+}
+
+function ApiKeysPanel() {
+  const qc = useQueryClient();
+  const keys = useQuery(apiKeysQuery());
+  const projects = useQuery(projectsQuery());
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [projectId, setProjectId] = useState<string>(ALL_PROJECTS);
+  const [rawKey, setRawKey] = useState<string | null>(null);
+
+  const create = useMutation({
+    mutationFn: () =>
+      api.createApiKey(name.trim(), projectId === ALL_PROJECTS ? undefined : projectId),
+    onSuccess: (r) => setRawKey(r.key),
+    onError: (e) =>
+      toast.error("Could not create key", {
+        description: e instanceof Error ? e.message : undefined,
+      }),
+  });
+
+  const revoke = useMutation({
+    mutationFn: (id: string | number) => api.revokeApiKey(id),
+    onSuccess: () => {
+      toast.success("Key revoked");
+      qc.invalidateQueries({ queryKey: ["api-keys"] });
+    },
+    onError: (e) =>
+      toast.error("Could not revoke key", {
+        description: e instanceof Error ? e.message : undefined,
+      }),
+  });
+
+  const closeDialog = () => {
+    setOpen(false);
+    setRawKey(null);
+    setName("");
+    setProjectId(ALL_PROJECTS);
+    create.reset();
+    qc.invalidateQueries({ queryKey: ["api-keys"] });
+  };
+
+  return (
+    <Panel
+      title="API keys"
+      description="Used by CI pipelines to call the SecureFlow gate."
+      className="lg:col-span-2"
+      actions={
+        <Button variant="hero" size="sm" onClick={() => setOpen(true)}>
+          <Plus className="h-3.5 w-3.5" /> Generate new key
+        </Button>
+      }
+    >
+      {keys.error ? (
+        <ErrorState error={keys.error} />
+      ) : keys.isLoading ? (
+        <TableSkeleton rows={3} cols={5} />
+      ) : (keys.data?.length ?? 0) === 0 ? (
+        <EmptyState
+          icon={KeyRound}
+          title="No API keys yet"
+          description="Generate a key to authenticate CI gate checks and SARIF downloads."
+        />
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-[12px]">
+            <thead>
+              <tr className="border-b border-border/60 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                <th className="py-2 pr-3 font-normal">Name</th>
+                <th className="py-2 pr-3 font-normal">Key</th>
+                <th className="py-2 pr-3 font-normal">Created</th>
+                <th className="py-2 pr-3 font-normal">Last used</th>
+                <th className="py-2 font-normal"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {(keys.data ?? []).map((k) => {
+                const revoked = Boolean(k.revoked_at);
+                return (
+                  <tr key={String(k.id)} className="border-b border-border/40">
+                    <td className="py-2 pr-3">{k.name}</td>
+                    <td className="py-2 pr-3 font-mono">{k.key_prefix}••••••••</td>
+                    <td className="py-2 pr-3">{fmtDate(k.created_at)}</td>
+                    <td className="py-2 pr-3">{fmtDate(k.last_used_at)}</td>
+                    <td className="py-2 text-right">
+                      {revoked ? (
+                        <span className="text-[11px] text-muted-foreground">Revoked</span>
+                      ) : (
+                        <AlertDialog>
+                          <AlertDialogTrigger asChild>
+                            <Button variant="outline" size="sm" className="h-7 text-[11px]">
+                              Revoke
+                            </Button>
+                          </AlertDialogTrigger>
+                          <AlertDialogContent>
+                            <AlertDialogHeader>
+                              <AlertDialogTitle>Revoke “{k.name}”?</AlertDialogTitle>
+                              <AlertDialogDescription>
+                                Any pipeline using this key will start failing immediately. This
+                                cannot be undone.
+                              </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                              <AlertDialogCancel>Cancel</AlertDialogCancel>
+                              <AlertDialogAction onClick={() => revoke.mutate(k.id)}>
+                                Revoke key
+                              </AlertDialogAction>
+                            </AlertDialogFooter>
+                          </AlertDialogContent>
+                        </AlertDialog>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <Dialog open={open} onOpenChange={(o) => (o ? setOpen(true) : closeDialog())}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{rawKey ? "Key created" : "Generate API key"}</DialogTitle>
+            <DialogDescription>
+              {rawKey
+                ? "Store this key in your CI secret manager."
+                : "Give the key a name so you can recognise it later."}
+            </DialogDescription>
+          </DialogHeader>
+
+          {rawKey ? (
+            <div className="space-y-3">
+              <div className="flex items-start gap-2 rounded-lg border border-warning/40 bg-warning/10 p-3 text-[12px] text-warning">
+                <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                <span>This is the only time you'll see this key — copy it now.</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Input readOnly value={rawKey} className="h-9 font-mono text-[12px]" />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(rawKey);
+                      toast.success("Key copied");
+                    } catch {
+                      toast.error("Could not copy to clipboard");
+                    }
+                  }}
+                >
+                  <Copy className="h-3.5 w-3.5" /> Copy
+                </Button>
+              </div>
+              <DialogFooter>
+                <Button size="sm" onClick={closeDialog}>
+                  Done
+                </Button>
+              </DialogFooter>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="space-y-1.5">
+                <Label htmlFor="key-name" className="text-[11px]">
+                  Name
+                </Label>
+                <Input
+                  id="key-name"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="e.g. GitHub Actions"
+                  className="h-9 text-[13px]"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-[11px]">Project</Label>
+                <Select value={projectId} onValueChange={setProjectId}>
+                  <SelectTrigger className="h-9 text-[13px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={ALL_PROJECTS}>All projects</SelectItem>
+                    {(projects.data ?? []).map((p) => (
+                      <SelectItem key={p.id} value={p.id}>
+                        {p.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <DialogFooter>
+                <Button
+                  size="sm"
+                  disabled={create.isPending}
+                  onClick={() => {
+                    if (!name.trim()) {
+                      toast.error("Enter a name for the key.");
+                      return;
+                    }
+                    create.mutate();
+                  }}
+                >
+                  {create.isPending ? "Creating…" : "Create"}
+                </Button>
+              </DialogFooter>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+    </Panel>
+  );
+}
 
 function Settings() {
   const { user, loading, signOut } = useAuth();
@@ -22,7 +273,11 @@ function Settings() {
         description="Manage your account, notifications and programmatic access."
       />
       <div className="grid gap-5 lg:grid-cols-2">
-        <Panel title="Your account" description="Details from your SecureFlow profile.">
+        <Panel
+          title="Your account"
+          description="Details from your SecureFlow profile."
+          className="lg:col-span-2"
+        >
           {loading ? (
             <div className="space-y-3">
               {Array.from({ length: 3 }).map((_, i) => (
@@ -90,25 +345,6 @@ function Settings() {
         </Panel>
 
         <Panel
-          title="Notifications"
-          description="Delivery preferences — not persisted yet; the API has no preferences endpoint."
-        >
-          <ul className="divide-y divide-border/60">
-            {[
-              "Email digest (daily)",
-              "Critical findings — immediate",
-              "Weekly posture summary",
-              "New project connected",
-            ].map((n, i) => (
-              <li key={n} className="flex items-center justify-between py-2.5 first:pt-0 last:pb-0">
-                <span className="text-[13px]">{n}</span>
-                <Switch defaultChecked={i < 2} />
-              </li>
-            ))}
-          </ul>
-        </Panel>
-
-        <Panel
           title="Connection"
           description="Where this console reads its data from."
           className="lg:col-span-2"
@@ -124,6 +360,8 @@ function Settings() {
             </p>
           </div>
         </Panel>
+
+        <ApiKeysPanel />
       </div>
     </>
   );

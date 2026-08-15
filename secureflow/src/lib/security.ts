@@ -31,7 +31,7 @@ const ENGINE_TO_MODULE: Record<string, ModuleKey> = {
   kics: "iac",
   terrascan: "iac",
   iac: "iac",
-  trivy: "container",
+  trivy: "sca",
   grype: "container",
   container: "container",
   zap: "dast",
@@ -41,10 +41,10 @@ const ENGINE_TO_MODULE: Record<string, ModuleKey> = {
 /** Query value sent to the backend for a given UI module. */
 export const MODULE_TO_ENGINE: Record<ModuleKey, string> = {
   sast: "semgrep",
-  sca: "osv",
+  sca: "trivy",
   secrets: "secrets",
   iac: "checkov",
-  container: "trivy",
+  container: "container",
   dast: "zap",
 };
 
@@ -323,6 +323,11 @@ export function buildTrend(findings: Finding[], days = 7) {
 /** Weighted 0–100 posture score derived from real severity counts. */
 export function securityScore(findings: Finding[]) {
   const c = countBySeverity(findings);
-  const penalty = c.critical * 6 + c.high * 3 + c.medium * 1 + c.low * 0.25;
-  return Math.max(0, Math.min(100, Math.round(100 - penalty)));
+  const weighted = c.critical * 10 + c.high * 5 + c.medium * 1.5 + c.low * 0.4;
+  // Diminishing returns: score decays smoothly toward 0 as weighted
+  // severity grows, instead of hitting a hard floor after a fixed count.
+  // scale=40 means ~40 weighted points ≈ score of 50.
+  const scale = 40;
+  const score = 100 * (scale / (scale + weighted));
+  return Math.max(0, Math.min(100, Math.round(score)));
 }

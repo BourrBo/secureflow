@@ -96,10 +96,42 @@ export type FindingsQuery = {
   scan_id?: string | number;
   severity?: ApiSeverity;
   scanner?: string;
+  q?: string;
   limit?: number;
   offset?: number;
 };
 
+export type ApiGateRun = {
+  id: string | number;
+  project_id: string | number;
+  project_name?: string;
+  scan_id?: string | number | null;
+  fail_on: string;
+  passed: boolean;
+  blocking_count: number;
+  total_findings: number;
+  commit_sha?: string | null;
+  triggered_by?: string | null;
+  created_at: string;
+};
+
+export type ApiApiKey = {
+  id: string | number;
+  name: string;
+  key_prefix: string;
+  project_id?: string | number | null;
+  created_at: string;
+  last_used_at?: string | null;
+  revoked_at?: string | null;
+};
+
+export type ApiBlockingFinding = {
+  id: string | number;
+  title?: string;
+  severity?: string;
+  scanner?: string;
+  file?: string;
+};
 
 function qs(params: Record<string, unknown>) {
   const sp = new URLSearchParams();
@@ -203,7 +235,8 @@ async function requestBlob(path: string, init: RequestInit = {}): Promise<Blob> 
 }
 
 export type ScanResponse = { scan_id?: string | number; [k: string]: unknown };
-export type DastMode = "quick" | "standard" | "full";
+/** DAST is full-assessment only in this product — no depth choice. */
+export type DastMode = "full";
 
 /**
  * POST /api/dast/scan returns immediately (it does not block for the scan's
@@ -238,6 +271,12 @@ export type ReportPdfRequest = {
 export const api = {
   listFindings: (q: FindingsQuery = {}) => request<FindingsResponse>(`/api/findings${qs(q)}`),
   clearFindings: () => request<{ deleted: number }>("/api/findings", { method: "DELETE" }),
+  /** Destructive workspace reset: deletes the user's findings, scans and projects. */
+  clearWorkspace: () =>
+    request<{ findings?: number; scans?: number; projects?: number; deleted?: number }>(
+      "/api/findings/all",
+      { method: "DELETE" },
+    ),
   listProjects: () => request<ApiProject[] | { projects: ApiProject[] }>("/api/projects"),
   getProject: (id: string | number) => request<ApiProject>(`/api/projects/${id}`),
   getProjectScans: (id: string | number) =>
@@ -247,13 +286,13 @@ export const api = {
 
   /* ── Scan triggers (paths mirror the backend contract exactly) ───── */
 
-  /** Runs SAST **and** SCA in a single backend call. */
-  scanRepo: (base: "sast" | "iac" | "secrets", repo_url: string) =>
+  /** Repo scan for a git-based module. SCA is Trivy-backed and has its own endpoint. */
+  scanRepo: (base: "sast" | "sca" | "iac" | "secrets", repo_url: string) =>
     request<ScanResponse>(`/api/${base}/scan`, {
       method: "POST",
       body: JSON.stringify({ repo_url }),
     }),
-  scanLocal: (base: "sast" | "iac" | "secrets", file: File) =>
+  scanLocal: (base: "sast" | "sca" | "iac" | "secrets", file: File) =>
     upload<ScanResponse>(`/api/${base}/scan-local`, file),
   scanContainer: (image_name: string) =>
     request<ScanResponse>("/api/container/scan", {
@@ -265,7 +304,7 @@ export const api = {
    * NOT wait for the scan to finish. Poll getDastScanStatus() with the
    * returned scan_id until status is "completed" or "failed".
    */
-  scanDast: (target_url: string, scan_mode: DastMode = "standard") =>
+  scanDast: (target_url: string, scan_mode: DastMode = "full") =>
     request<DastScanStartResponse>("/api/dast/scan", {
       method: "POST",
       body: JSON.stringify({ target_url, scan_mode }),
@@ -274,6 +313,30 @@ export const api = {
     request<DastScanStatusResponse>(`/api/dast/scan/${scanId}`),
 
   reportPdf: (scanId: string | number) => requestBlob(`/api/reports/${scanId}/pdf`),
+
+  /* ── CI/CD gate + API keys ───────────────────────────────────────── */
+
+  evaluateGate: (body: {
+    project_id: string | number;
+    fail_on: string;
+    scan_id?: string | number;
+    commit_sha?: string;
+    triggered_by?: string;
+  }) =>
+    request<ApiGateRun & { blocking_findings: ApiBlockingFinding[] }>("/api/gate/evaluate", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  listGateRuns: (project_id?: string | number) =>
+    request<{ runs: ApiGateRun[] }>(`/api/gate/runs${qs({ project_id })}`),
+  listApiKeys: () => request<{ keys: ApiApiKey[] }>("/api/keys"),
+  createApiKey: (name: string, project_id?: string | number) =>
+    request<ApiApiKey & { key: string }>("/api/keys", {
+      method: "POST",
+      body: JSON.stringify({ name, project_id }),
+    }),
+  revokeApiKey: (id: string | number) =>
+    request<{ revoked: boolean }>(`/api/keys/${id}`, { method: "DELETE" }),
 
   /** Generates a report directly from the findings of the scan just run. */
   reportPdfFromFindings: (body: ReportPdfRequest) =>

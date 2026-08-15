@@ -1,36 +1,16 @@
 import { useRef, useState } from "react";
-import { useMutation } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { api, type ApiFinding } from "@/lib/api";
+import { type ApiFinding } from "@/lib/api";
 import { MODULE_LABEL, type ModuleKey } from "@/lib/security";
 import { useDastScan } from "@/lib/dastScan";
+import { REPO_BASE, useModuleScan } from "@/lib/moduleScan";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Loader2, Play, Github, Upload, X } from "lucide-react";
 
-/** git-based modules share one repo-url / zip-upload shape. */
-const REPO_BASE: Partial<Record<ModuleKey, "sast" | "iac" | "secrets">> = {
-  sast: "sast",
-  sca: "sast", // SCA results are produced by the same backend call as SAST
-  iac: "iac",
-  secrets: "secrets",
-};
-
 type Source = "repo" | "zip";
 
 export type ScanResult = { findings: ApiFinding[]; label: string };
-
-/** Scan endpoints return the findings for that run directly. */
-function extractFindings(res: unknown): ApiFinding[] {
-  if (Array.isArray(res)) return res as ApiFinding[];
-  if (res && typeof res === "object") {
-    const r = res as Record<string, unknown>;
-    for (const key of ["findings", "results", "vulnerabilities", "issues"]) {
-      if (Array.isArray(r[key])) return r[key] as ApiFinding[];
-    }
-  }
-  return [];
-}
 
 /** Human label for a DAST phase key, e.g. "active scan" -> "Active scan". */
 function phaseLabel(phase: string | null): string {
@@ -40,7 +20,11 @@ function phaseLabel(phase: string | null): string {
   return phase.charAt(0).toUpperCase() + phase.slice(1);
 }
 
-function DastProgressBar({ phase, pct }: { phase: string | null; pct: number | null }) {
+/**
+ * Real progress only: a percentage is rendered exclusively when the backend
+ * reports one (DAST). Synchronous modules get an honest indeterminate bar.
+ */
+function ScanProgressBar({ phase, pct }: { phase: string | null; pct: number | null }) {
   const hasPct = typeof pct === "number";
   return (
     <div className="w-full">
@@ -62,13 +46,7 @@ function DastProgressBar({ phase, pct }: { phase: string | null; pct: number | n
   );
 }
 
-export function ScanLauncher({
-  module,
-  onResult,
-}: {
-  module: ModuleKey;
-  onResult?: (result: ScanResult) => void;
-}) {
+export function ScanLauncher({ module }: { module: ModuleKey }) {
   const name = MODULE_LABEL[module];
   const fileInput = useRef<HTMLInputElement>(null);
 
@@ -77,39 +55,13 @@ export function ScanLauncher({
   const [file, setFile] = useState<File | null>(null);
 
   const dast = useDastScan();
+  const moduleScan = useModuleScan(module);
 
   const base = REPO_BASE[module];
 
-  const mutation = useMutation({
-    mutationFn: async () => {
-      if (module === "container") {
-        if (!value.trim()) throw new Error("Enter a container image reference.");
-        return { res: await api.scanContainer(value.trim()), label: value.trim() };
-      }
-      if (!base) throw new Error("Unsupported module.");
-      if (source === "zip") {
-        if (!file) throw new Error("Choose a .zip archive to upload.");
-        return { res: await api.scanLocal(base, file), label: file.name };
-      }
-      if (!value.trim()) throw new Error("Enter a GitHub repository URL.");
-      return { res: await api.scanRepo(base, value.trim()), label: value.trim() };
-    },
-    onSuccess: ({ res, label }) => {
-      const findings = extractFindings(res);
-      toast.success(`${name} scan complete`, {
-        description: `${findings.length} finding${findings.length === 1 ? "" : "s"} returned.`,
-      });
-      onResult?.({ findings, label });
-    },
-    onError: (e: unknown) => {
-      toast.error(`${name} scan failed`, {
-        description: e instanceof Error ? e.message : "Unexpected error.",
-      });
-    },
-  });
-
   const dastRunning = dast.state.status === "running";
-  const running = module === "dast" ? dastRunning : mutation.isPending;
+  const moduleRunning = moduleScan.running !== null;
+  const running = module === "dast" ? dastRunning : moduleRunning;
 
   const handleRun = () => {
     if (module === "dast") {
@@ -120,7 +72,27 @@ export function ScanLauncher({
       dast.start(value.trim());
       return;
     }
-    mutation.mutate();
+    if (module === "container") {
+      if (!value.trim()) {
+        toast.error("Enter a container image reference.");
+        return;
+      }
+      moduleScan.start({ source: "image", value: value.trim() });
+      return;
+    }
+    if (source === "zip") {
+      if (!file) {
+        toast.error("Choose a .zip archive to upload.");
+        return;
+      }
+      moduleScan.start({ source: "zip", file });
+      return;
+    }
+    if (!value.trim()) {
+      toast.error("Enter a GitHub repository URL.");
+      return;
+    }
+    moduleScan.start({ source: "repo", value: value.trim() });
   };
 
   return (
@@ -226,20 +198,18 @@ export function ScanLauncher({
         </Button>
       </div>
 
-      {module === "dast" && dastRunning && (
-        <DastProgressBar phase={dast.state.phase} pct={dast.state.pct} />
-      )}
+      {module === "dast"
+        ? dastRunning && <ScanProgressBar phase={dast.state.phase} pct={dast.state.pct} />
+        : moduleRunning && <ScanProgressBar phase="Scanning…" pct={null} />}
 
       <p className="text-[11px] text-muted-foreground">
-        {module === "sca"
-          ? "SCA results are generated together with a SAST scan — one run produces both."
-          : module === "dast"
-            ? dastRunning
-              ? "Running in the background — safe to switch tabs or navigate away, this keeps going and reconnects automatically if your connection drops."
-              : "Full scan only — spider, AJAX spider and active scan, against a live target. Can take several minutes to over an hour depending on the target."
-            : running
-              ? "Scan in progress — this can take a few minutes for large repositories."
-              : "Scans run server-side; results for this run appear below when it completes."}
+        {module === "dast"
+          ? dastRunning
+            ? "Running in the background — safe to switch tabs or navigate away, this keeps going and reconnects automatically if your connection drops."
+            : "Full scan only — spider, AJAX spider and active scan, against a live target. Can take several minutes to over an hour depending on the target."
+          : running
+            ? "Scan in progress — this can take a few minutes for large repositories."
+            : "Scans run server-side; results for this run appear below when it completes."}
       </p>
     </div>
   );

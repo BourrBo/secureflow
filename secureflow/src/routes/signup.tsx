@@ -93,12 +93,7 @@ function SignupPage() {
       }
     >
       <GoogleButton onClick={onGoogle} text="signup_with" />
-      <Button
-        variant="secondary"
-        size="lg"
-        className="mt-3 w-full"
-        onClick={onGitHub}
-      >
+      <Button variant="secondary" size="lg" className="mt-3 w-full" onClick={onGitHub}>
         <Github className="mr-2 h-5 w-5" />
         Sign up with GitHub
       </Button>

@@ -96,7 +96,9 @@ function Projects() {
                   </span>
                 </div>
                 <Button asChild variant="ghost" size="sm" className="mt-3 w-full">
-                  <Link to="/dashboard/findings">View findings</Link>
+                  <Link to="/dashboard/findings" search={{ q: "" }}>
+                    View findings
+                  </Link>
                 </Button>
               </Panel>
             );

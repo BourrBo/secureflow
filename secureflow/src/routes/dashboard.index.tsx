@@ -135,10 +135,22 @@ function Overview() {
           )}
         </Panel>
 
-        <Panel title="Security score" description="Weighted by open severity">
+        <Panel
+          title="Security score"
+          description={all.length === 0 ? "No scan evidence yet" : "Weighted by open severity"}
+        >
           <div className="flex flex-col items-center py-1">
             {loading ? (
               <Skeleton className="h-36 w-36 rounded-full" />
+            ) : all.length === 0 ? (
+              <div className="grid h-36 w-36 place-items-center rounded-full border border-dashed border-border/70 text-center">
+                <div>
+                  <div className="font-display text-4xl font-semibold leading-none">—</div>
+                  <div className="mt-1 font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+                    Not assessed
+                  </div>
+                </div>
+              </div>
             ) : (
               <div className="relative grid h-36 w-36 place-items-center">
                 <svg className="absolute inset-0 -rotate-90" viewBox="0 0 100 100">
@@ -176,6 +188,11 @@ function Overview() {
                   </div>
                 </div>
               </div>
+            )}
+            {!loading && all.length === 0 && (
+              <p className="mt-3 text-center text-[11px] text-muted-foreground">
+                No findings recorded — run a scan to calculate score.
+              </p>
             )}
             <div className="mt-4 w-full space-y-1.5">
               {(["critical", "high", "medium", "low"] as const).map((s) => (
@@ -255,7 +272,7 @@ function Overview() {
                 <Skeleton key={i} className="h-8" />
               ))}
             </div>
-          ) : (compliance.data?.length ?? 0) === 0 ? (
+          ) : (compliance.data?.frameworks.length ?? 0) === 0 ? (
             <EmptyState
               icon={ShieldCheck}
               title="No frameworks tracked"
@@ -263,7 +280,7 @@ function Overview() {
             />
           ) : (
             <ul className="space-y-3">
-              {compliance.data!.slice(0, 5).map((c) => (
+              {compliance.data!.frameworks.slice(0, 5).map((c) => (
                 <li key={c.name}>
                   <div className="flex items-center justify-between text-[12px]">
                     <span>{c.name}</span>
@@ -287,7 +304,7 @@ function Overview() {
         description="Highest-severity issues across your workspace"
         actions={
           <Button asChild variant="ghost" size="sm">
-            <Link to="/dashboard/findings">
+            <Link to="/dashboard/findings" search={{ q: "" }}>
               View all <ArrowRight className="h-3.5 w-3.5" />
             </Link>
           </Button>

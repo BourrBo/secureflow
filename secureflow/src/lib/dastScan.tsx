@@ -11,6 +11,7 @@ import {
 import { toast } from "sonner";
 import { api, type ApiFinding } from "./api";
 import { useScanResult } from "./scanResults";
+import { useNotifications } from "./notifications";
 
 type DastStatus = "idle" | "running" | "completed" | "failed";
 
@@ -99,6 +100,7 @@ function persist(state: DastState) {
 export function DastScanProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<DastState>(loadInitial);
   const { setResult } = useScanResult("dast");
+  const { push } = useNotifications();
   const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const stateRef = useRef(state);
   stateRef.current = state;
@@ -122,6 +124,11 @@ export function DastScanProvider({ children }: { children: ReactNode }) {
           toast.success("DAST scan complete", {
             description: `${findings.length} finding${findings.length === 1 ? "" : "s"} returned.`,
           });
+          push({
+            kind: "success",
+            title: "DAST scan complete",
+            description: `${stateRef.current.targetUrl ?? `scan #${scanId}`} — ${findings.length} finding${findings.length === 1 ? "" : "s"}`,
+          });
           clearTimer();
           return;
         }
@@ -130,6 +137,7 @@ export function DastScanProvider({ children }: { children: ReactNode }) {
           const message = res.error || "DAST scan failed.";
           setState((s) => ({ ...s, status: "failed", error: message }));
           toast.error("DAST scan failed", { description: message });
+          push({ kind: "error", title: "DAST scan failed", description: message });
           clearTimer();
           return;
         }
@@ -151,7 +159,7 @@ export function DastScanProvider({ children }: { children: ReactNode }) {
         pollTimer.current = setTimeout(() => pollOnce(scanId), POLL_INTERVAL_MS);
       }
     },
-    [clearTimer, setResult],
+    [clearTimer, setResult, push],
   );
 
   // Resume polling on mount if a scan was left running (tab switch, nav,
@@ -193,16 +201,18 @@ export function DastScanProvider({ children }: { children: ReactNode }) {
         error: null,
       });
       try {
-        const started = await api.scanDast(targetUrl, "full");
+        const started = await api.scanDast(targetUrl);
         setState((s) => ({ ...s, scanId: started.scan_id }));
+        push({ kind: "info", title: "DAST scan started", description: targetUrl });
         pollOnce(started.scan_id);
       } catch (e) {
         const message = e instanceof Error ? e.message : "Could not start scan.";
         setState((s) => ({ ...s, status: "failed", error: message }));
         toast.error("DAST scan failed to start", { description: message });
+        push({ kind: "error", title: "DAST scan failed to start", description: message });
       }
     },
-    [clearTimer, pollOnce],
+    [clearTimer, pollOnce, push],
   );
 
   const reset = useCallback(() => {

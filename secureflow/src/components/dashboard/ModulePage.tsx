@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import {
   countBySeverity,
   relativeTime,
@@ -8,24 +8,40 @@ import {
 } from "@/lib/security";
 import { PageHeader, Panel, StatCard } from "./primitives";
 import { ModuleFindingsTable } from "./ModuleFindingsTable";
-import { ScanLauncher, type ScanResult } from "./ScanLauncher";
+import { ScanLauncher } from "./ScanLauncher";
 import { ExportReportButton } from "./ExportReportButton";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { useScanResult } from "@/lib/scanResults";
-import { Bug, ShieldAlert, AlertTriangle, Clock, RotateCcw } from "lucide-react";
+import { Bug, ShieldAlert, AlertTriangle, Clock, RotateCcw, Search } from "lucide-react";
 
 export function ModulePage({ module, description }: { module: ModuleKey; description: string }) {
   const name = MODULE_LABEL[module];
+
   /**
    * Module pages are session-scoped: results come only from the scan the user just
    * ran (the POST response), never from the persisted /api/findings aggregate.
    */
-  const { result, ranAt, setResult, resetResult } = useScanResult(module);
+  const { result, ranAt, resetResult } = useScanResult(module);
+
+  const [query, setQuery] = useState("");
 
   const findings = useMemo(
     () => (result?.findings ?? []).map((f, i) => normalizeFinding(f, i)),
     [result],
   );
+
+  const filteredFindings = useMemo(() => {
+    if (!query.trim()) return findings;
+    const q = query.toLowerCase();
+    return findings.filter((f) => {
+      const hay = [f.title, f.file, f.description, f.cwe, f.cve, f.rule, f.owasp]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      return hay.includes(q);
+    });
+  }, [findings, query]);
 
   const stats = useMemo(() => {
     const c = countBySeverity(findings);
@@ -33,6 +49,11 @@ export function ModulePage({ module, description }: { module: ModuleKey; descrip
   }, [findings]);
 
   const scanned = result !== null;
+
+  const handleReset = () => {
+    setQuery("");
+    resetResult();
+  };
 
   return (
     <>
@@ -47,17 +68,12 @@ export function ModulePage({ module, description }: { module: ModuleKey; descrip
           module === "container"
             ? "Point at a container image reference to analyse its layers"
             : module === "dast"
-              ? "Point at a running target and choose a scan depth"
+              ? "Point at a running target to run a full DAST assessment"
               : "Point at a GitHub repository or upload a local .zip archive"
         }
         className="mb-5"
       >
-        <ScanLauncher
-          module={module}
-          onResult={(r: ScanResult) => {
-            setResult(r);
-          }}
-        />
+        <ScanLauncher module={module} />
       </Panel>
       <div className="grid gap-3 md:grid-cols-4">
         <StatCard
@@ -104,7 +120,7 @@ export function ModulePage({ module, description }: { module: ModuleKey; descrip
               variant="outline"
               size="sm"
               disabled={!scanned}
-              onClick={resetResult}
+              onClick={handleReset}
               title={scanned ? "Clear this module's scan results" : "Nothing to reset yet"}
             >
               <RotateCcw className="h-3.5 w-3.5" />
@@ -113,14 +129,39 @@ export function ModulePage({ module, description }: { module: ModuleKey; descrip
           </div>
         }
       >
+        {scanned && (
+          <div className="mb-4 flex flex-wrap items-center gap-2">
+            <div className="relative min-w-[200px] flex-1">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder={`Search ${name} results...`}
+                className="h-9 pl-9 text-[13px]"
+              />
+              {query && (
+                <button
+                  type="button"
+                  aria-label="Clear search"
+                  onClick={() => setQuery("")}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] text-muted-foreground hover:text-foreground"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+          </div>
+        )}
         <ModuleFindingsTable
           module={module}
-          findings={findings}
+          findings={filteredFindings}
           target={result?.label}
           emptyTitle={scanned ? `No ${name} findings` : "Ready to scan"}
           emptyDescription={
             scanned
-              ? `This ${name} scan completed without any findings.`
+              ? query.trim()
+                ? `No ${name} results match "${query.trim()}". Try a different term.`
+                : `This ${name} scan completed without any findings.`
               : "Enter a repository, image or target above and run a scan to see results here."
           }
         />

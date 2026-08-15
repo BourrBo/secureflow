@@ -19,7 +19,13 @@ import {
 } from "@/components/ui/alert-dialog";
 import { findingsPageQuery } from "@/lib/queries";
 import { api } from "@/lib/api";
-import { countBySeverity, MODULE_LABEL, type Severity } from "@/lib/security";
+import {
+  countBySeverity,
+  MODULE_LABEL,
+  normalizeFinding,
+  type Finding,
+  type Severity,
+} from "@/lib/security";
 import { Bug, ShieldAlert, AlertTriangle, Search, Download, Trash2, Loader2 } from "lucide-react";
 
 const PAGE_SIZE = 25;
@@ -30,7 +36,6 @@ export const Route = createFileRoute("/dashboard/findings")({
   }),
   component: Findings,
 });
-
 
 const FILTERS: Array<{ label: string; value: Severity | "all" }> = [
   { label: "All", value: "all" },
@@ -43,11 +48,19 @@ const FILTERS: Array<{ label: string; value: Severity | "all" }> = [
 function Findings() {
   const { q: initialQ } = Route.useSearch();
   const [severity, setSeverity] = useState<Severity | "all">("all");
+  const [inputValue, setInputValue] = useState(initialQ ?? "");
   const [q, setQ] = useState(initialQ ?? "");
   const [page, setPage] = useState(0);
   const [clearing, setClearing] = useState(false);
   const queryClient = useQueryClient();
-  const { data, isLoading, error } = useQuery(findingsPageQuery(PAGE_SIZE, page * PAGE_SIZE));
+  const { data, isLoading, error } = useQuery(
+    findingsPageQuery(PAGE_SIZE, page * PAGE_SIZE, q || undefined),
+  );
+
+  useEffect(() => {
+    const timer = setTimeout(() => setQ(inputValue), 350);
+    return () => clearTimeout(timer);
+  }, [inputValue]);
 
   useEffect(() => {
     setPage(0);
@@ -56,18 +69,10 @@ function Findings() {
   const all = useMemo(() => data?.items ?? [], [data]);
   const total = data?.total ?? all.length;
   const counts = useMemo(() => countBySeverity(all), [all]);
-  const rows = useMemo(() => {
-    const term = q.trim().toLowerCase();
-    return all.filter(
-      (f) =>
-        (severity === "all" || f.severity === severity) &&
-        (!term ||
-          f.title.toLowerCase().includes(term) ||
-          f.id.toLowerCase().includes(term) ||
-          f.project.toLowerCase().includes(term) ||
-          f.moduleLabel.toLowerCase().includes(term)),
-    );
-  }, [all, severity, q]);
+  const rows = useMemo(
+    () => all.filter((f) => severity === "all" || f.severity === severity),
+    [all, severity],
+  );
 
   const modules = useMemo(() => {
     const set = new Set(all.map((f) => f.module).filter(Boolean));
@@ -76,19 +81,118 @@ function Findings() {
 
   const dash = isLoading || error ? "—" : undefined;
 
-  async function clearFindings() {
+  async function clearWorkspace() {
     setClearing(true);
     try {
-      const r = await api.clearFindings();
-      toast.success(`Cleared ${r.deleted} findings`);
-      await queryClient.invalidateQueries({ queryKey: ["findings-page"] });
-      await queryClient.invalidateQueries({ queryKey: ["findings"] });
+      const r = await api.clearWorkspace();
+      const parts = [
+        `${r.findings ?? r.deleted ?? 0} findings`,
+        `${r.scans ?? 0} scans`,
+        `${r.projects ?? 0} projects`,
+      ];
+      toast.success(`Workspace cleared — deleted ${parts.join(", ")}`);
+      for (const key of [
+        "findings",
+        "findings-page",
+        "projects",
+        "project-scans",
+        "reports",
+        "compliance",
+        "gate-runs",
+      ]) {
+        queryClient.invalidateQueries({ queryKey: [key] });
+      }
+      await queryClient.refetchQueries({ type: "active" });
     } catch (e) {
-      toast.error("Could not clear findings", {
+      toast.error("Could not clear workspace", {
         description: e instanceof Error ? e.message : "Unexpected error.",
       });
     } finally {
       setClearing(false);
+    }
+  }
+
+  const [exporting, setExporting] = useState(false);
+
+  function csvEscape(value: unknown): string {
+    const text = value === null || value === undefined ? "" : String(value);
+    if (text.includes(",") || text.includes('"') || text.includes("\n") || text.includes("\r")) {
+      return '"' + text.replace(/"/g, '""') + '"';
+    }
+    return text;
+  }
+
+  function findingsToCsv(findings: Finding[]): string {
+    const headers = [
+      "id",
+      "title",
+      "severity",
+      "scanner",
+      "project",
+      "file",
+      "line",
+      "cwe",
+      "owasp",
+      "iso27001_control",
+      "cve",
+      "epss_score",
+      "priority_score",
+      "created_at",
+    ];
+    const rows = findings.map((f) => [
+      f.id,
+      f.title,
+      f.severity,
+      f.moduleLabel,
+      f.project,
+      f.file,
+      f.line,
+      f.cwe,
+      f.owasp,
+      f.iso?.control ?? "",
+      f.cve,
+      f.epssScore,
+      f.priorityScore,
+      f.createdAt ? f.createdAt.toISOString() : "",
+    ]);
+    return [headers, ...rows].map((row) => row.map(csvEscape).join(",")).join("\n");
+  }
+
+  async function handleExport() {
+    if (exporting) return;
+    setExporting(true);
+    try {
+      const r = await api.listFindings({
+        q: q || undefined,
+        severity:
+          severity !== "all"
+            ? (severity.toUpperCase() as "CRITICAL" | "HIGH" | "MEDIUM" | "LOW" | "INFO")
+            : undefined,
+        limit: undefined,
+      });
+      const list = Array.isArray(r) ? r : (r?.findings ?? []);
+      if (list.length === 0) {
+        toast("No findings to export");
+        return;
+      }
+      const findings = list.map((f, i) => normalizeFinding(f, i));
+      const csv = findingsToCsv(findings);
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `secureflow-findings-${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      toast.success(`Exported ${findings.length} findings`);
+    } catch (e) {
+      toast.error("Could not export findings", {
+        description: e instanceof Error ? e.message : "Unexpected error.",
+      });
+    } finally {
+      setExporting(false);
     }
   }
 
@@ -100,8 +204,13 @@ function Findings() {
         description="Every open issue across every module, ranked by severity and recency."
         actions={
           <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm">
-              <Download className="h-3.5 w-3.5" /> Export
+            <Button variant="outline" size="sm" disabled={exporting} onClick={handleExport}>
+              {exporting ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Download className="h-3.5 w-3.5" />
+              )}
+              Export
             </Button>
             <AlertDialog>
               <AlertDialogTrigger asChild>
@@ -111,22 +220,22 @@ function Findings() {
                   ) : (
                     <Trash2 className="h-3.5 w-3.5" />
                   )}
-                  Clear findings
+                  Clear workspace
                 </Button>
               </AlertDialogTrigger>
               <AlertDialogContent>
                 <AlertDialogHeader>
-                  <AlertDialogTitle>Delete every stored finding?</AlertDialogTitle>
+                  <AlertDialogTitle>Reset this workspace?</AlertDialogTitle>
                   <AlertDialogDescription>
-                    This permanently removes all persisted findings from the workspace database (
-                    {total.toLocaleString()} rows). Scan history and reports generated from these
-                    findings cannot be recovered.
+                    This permanently deletes all findings ({total.toLocaleString()} rows), scan
+                    history, and projects in your workspace. Reports generated from this data cannot
+                    be recovered.
                   </AlertDialogDescription>
                 </AlertDialogHeader>
                 <AlertDialogFooter>
                   <AlertDialogCancel>Cancel</AlertDialogCancel>
-                  <AlertDialogAction onClick={clearFindings}>
-                    Yes, delete all findings
+                  <AlertDialogAction onClick={clearWorkspace}>
+                    Yes, delete everything
                   </AlertDialogAction>
                 </AlertDialogFooter>
               </AlertDialogContent>
@@ -169,11 +278,24 @@ function Findings() {
           <div className="relative min-w-[200px] flex-1">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              placeholder="Search by ID, title, project or module…"
+              value={inputValue}
+              onChange={(e) => setInputValue(e.target.value)}
+              placeholder="Search title, CVE, CWE, rule, file, project or module…"
               className="h-9 pl-9 text-[13px]"
             />
+            {inputValue && (
+              <button
+                type="button"
+                aria-label="Clear search"
+                onClick={() => {
+                  setInputValue("");
+                  setQ("");
+                }}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] text-muted-foreground hover:text-foreground"
+              >
+                Clear
+              </button>
+            )}
           </div>
           <div className="flex items-center gap-1 rounded-lg border border-border/70 bg-secondary/20 p-1">
             {FILTERS.map((f) => (
@@ -206,7 +328,8 @@ function Findings() {
           <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
             <span className="text-[11px] text-muted-foreground">
               Showing {(page * PAGE_SIZE + 1).toLocaleString()}–
-              {(page * PAGE_SIZE + all.length).toLocaleString()} of {total.toLocaleString()} findings
+              {(page * PAGE_SIZE + all.length).toLocaleString()} of {total.toLocaleString()}{" "}
+              findings
             </span>
             <div className="flex items-center gap-1">
               <Button

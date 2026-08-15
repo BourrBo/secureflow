@@ -13,6 +13,7 @@ import {
   Bug,
   FolderGit2,
   FileText,
+  GitBranch,
   ScrollText,
   Settings,
 } from "lucide-react";
@@ -45,6 +46,7 @@ const workspace = [
   { title: "Findings", url: "/dashboard/findings", icon: Bug },
   { title: "Projects", url: "/dashboard/projects", icon: FolderGit2 },
   { title: "Reports", url: "/dashboard/reports", icon: FileText },
+  { title: "Pipeline", url: "/dashboard/pipeline", icon: GitBranch },
   { title: "Compliance", url: "/dashboard/compliance", icon: ScrollText },
   { title: "Settings", url: "/dashboard/settings", icon: Settings },
 ];
