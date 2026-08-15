@@ -99,6 +99,21 @@ def _get_pool() -> psycopg2.pool.ThreadedConnectionPool:
     return _POOL
 
 
+def close_pool():
+    """Closes every pooled connection on graceful shutdown (SIGTERM from
+    Docker/Railway, or a clean Ctrl+C). Not strictly required — the OS
+    reclaims the sockets when the process exits either way — but it means
+    Postgres sees a clean connection close instead of the client just
+    disappearing, and avoids a few seconds of "still waiting on that
+    connection" on the Supabase side after every restart. Safe to call even
+    if the pool was never initialized (e.g. DATABASE_URL was never set)."""
+    global _POOL
+    if _POOL is not None:
+        _POOL.closeall()
+        _POOL = None
+        logger.info("Closed DB connection pool.")
+
+
 def _get_conn_with_retry():
     """Borrows a connection from the pool, retrying transient failures
     (DNS hiccups, connection resets, etc.) with backoff before giving up."""

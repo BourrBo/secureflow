@@ -9,5 +9,6 @@ psycopg2-binary
 requests
 semgrep
 checkov
+python-owasp-zap-v2.4
 epss-api
 python-dotenv

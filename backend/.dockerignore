@@ -1,0 +1,30 @@
+# Secrets — never bake these into an image layer
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# Local DB / scan artifacts
+*.db
+*.sqlite
+*.sqlite3
+tmp_scans/
+test_repo.zip
+*.zip
+
+# Editors / OS / VCS
+.git/
+.vscode/
+.idea/
+.DS_Store
+
+# Tests — not needed at runtime
+tests/
+test_container.py

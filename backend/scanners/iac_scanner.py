@@ -4,6 +4,10 @@ import shutil
 import subprocess
 import sys
 
+# Same reasoning as semgrep_runner.py's _TIMEOUT_SECS — generous headroom
+# over a normal run, but bounded so a hang can't block a request forever.
+_TIMEOUT_SECS = 600
+
 
 def run_iac_scan(repo_path: str) -> dict:
     """
@@ -20,20 +24,28 @@ def run_iac_scan(repo_path: str) -> dict:
                 "Checkov executable not found. Install Checkov in the current venv and retry."
             )
 
-    result = subprocess.run(
-        [
-            checkov_cmd,
-            "--directory", repo_path,
-            "--output", "json",
-            "--quiet",
-            "--compact"         # removes code block from output, keeps it lean
-        ],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="ignore",
-        check=False,  # returncode is checked manually below, with our own error message
-    )
+    try:
+        result = subprocess.run(
+            [
+                checkov_cmd,
+                "--directory", repo_path,
+                "--output", "json",
+                "--quiet",
+                "--compact"         # removes code block from output, keeps it lean
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="ignore",
+            check=False,  # returncode is checked manually below, with our own error message
+            timeout=_TIMEOUT_SECS,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(
+            f"Checkov did not finish within {_TIMEOUT_SECS}s and was killed. "
+            "This usually means an unusually large IaC directory — try again, "
+            "or scan a narrower path."
+        ) from exc
 
     if result.returncode not in (0, 1):
         raise RuntimeError(

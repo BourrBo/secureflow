@@ -1,4 +1,5 @@
 import logging
+import threading
 
 try:
     from epss_api import EPSS
@@ -16,8 +17,53 @@ logger = logging.getLogger(__name__)
 
 _http_endpoint = "https://api.first.org/data/v1/epss"
 
-# Shared EPSS client
-_client = EPSS() if EPSS is not None else None
+# Shared EPSS client — lazily constructed, not built at import time.
+#
+# EPSS()'s constructor (from the epss_api package) synchronously downloads
+# the *entire* EPSS dataset (a gzipped CSV of every scored CVE) from
+# epss.cyentia.com, with no timeout. That used to run unconditionally at
+# module import time (`_client = EPSS() if EPSS is not None else None`),
+# which meant: every backend startup blocked on a multi-second-or-worse
+# bulk download before the app could serve even /health, AND any network
+# hiccup at that exact moment (DNS not ready yet during a container cold
+# start, a firewall, the host being briefly down) crashed the entire
+# backend at import time — not just disabled EPSS scoring, which is what
+# the rest of this file's design clearly intends (get_epss_scores() already
+# treats the library and the HTTP fallback as best-effort, catching
+# exceptions and falling through). This eager, unguarded construction was
+# the one place that didn't follow that pattern.
+#
+# Fix: defer construction to first actual use, inside a try/except, so an
+# import-time failure can never happen — worst case, EPSS scoring falls
+# back to the per-request HTTP API path that already exists below.
+_client = None
+_client_init_attempted = False
+_client_lock = threading.Lock()
+
+
+def _get_client():
+    global _client, _client_init_attempted
+    if _client_init_attempted:
+        return _client
+    with _client_lock:
+        if _client_init_attempted:  # re-check inside the lock
+            return _client
+        _client_init_attempted = True
+        if EPSS is None:
+            return None
+        try:
+            _client = EPSS()
+        except Exception as exc:  # noqa: BLE001 — same reasoning as the
+            # runtime fallback below: any failure here (network, DNS,
+            # timeout — urlopen has none — a malformed response) must
+            # degrade to the HTTP API path, never take the process down.
+            logger.warning(
+                "EPSS library failed to initialize (%s) — falling back to "
+                "the per-request HTTP API for EPSS scoring.", exc,
+            )
+            _client = None
+        return _client
+
 
 # Simple in-memory cache
 _cache: dict[str, dict] = {}
@@ -71,13 +117,13 @@ def get_epss_scores(cve_ids: list[str]) -> dict[str, dict]:
     # Method 1: Python EPSS library
     # ------------------------------------------------------------
 
-    if _client is not None:
+    if (client := _get_client()) is not None:
 
         try:
 
             for cve in unique_cves:
 
-                data = _client.score(cve)
+                data = client.score(cve)
 
                 if not data:
                     continue
