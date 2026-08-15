@@ -1,0 +1,58 @@
+# SecureFlow — local development compose file.
+#
+# NOTE ON "Database" as a compose service: SecureFlow's database is a
+# hosted Supabase Postgres project, not something this repo runs itself —
+# there's no local Postgres container here. If you want a fully offline
+# dev loop (no network dependency on Supabase at all), that's a separate,
+# bigger decision — see the chat message this shipped with. As shipped,
+# both services just point at your real Supabase project via env vars,
+# same as running them without Docker.
+#
+# Usage:
+#   1. cp backend/.env.example backend/.env.docker   (fill in real values)
+#   2. cp secureflow/.env.example secureflow/.env.docker
+#   3. docker compose up --build
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    env_file:
+      - ./backend/.env.docker
+    environment:
+      - PORT=8000
+    volumes:
+      # Mount source for live-reload during local dev. Remove this if you
+      # want the container to run purely on what was baked in at build time.
+      - ./backend:/app
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./secureflow
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    env_file:
+      - ./secureflow/.env.docker
+    environment:
+      # Point the frontend at the backend service by its compose DNS name,
+      # not localhost — localhost inside the frontend container would mean
+      # "this container", not the backend one.
+      - VITE_API_URL=http://backend:8000
+    volumes:
+      - ./secureflow:/app
+      - /app/node_modules
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
