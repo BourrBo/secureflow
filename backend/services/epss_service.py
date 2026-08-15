@@ -125,14 +125,24 @@ def get_epss_scores(cve_ids: list[str]) -> dict[str, dict]:
 
                 data = client.score(cve)
 
-                if not data:
+                if data is None:
                     continue
 
-                score = float(data.get("epss", 0))
+                # epss_api's Score.score() returns a Score OBJECT
+                # (attributes: .cve, .epss, .percentile) — not a dict. The
+                # old code called data.get("epss", 0), which is dict syntax
+                # and raised AttributeError on every CVE actually found in
+                # the dataset (a miss correctly returns None and skips via
+                # the check above; a hit is where this broke). That
+                # exception was swallowed by the except block below and
+                # silently discarded whatever had already been collected
+                # this call, which is the real reason EPSS scores were
+                # coming back empty — not a network or container issue.
+                score = float(data.epss)
 
                 info = {
-                    "score": str(data.get("epss", "N/A")),
-                    "percentile": str(data.get("percentile", "N/A")),
+                    "score": str(data.epss),
+                    "percentile": str(data.percentile),
                     "risk_level": _risk_level(score),
                 }
 
@@ -143,8 +153,12 @@ def get_epss_scores(cve_ids: list[str]) -> dict[str, dict]:
 
         except Exception as exc:  # noqa: BLE001 — epss_api has no documented
             # exception hierarchy; any failure here should fall back to the
-            # HTTP API rather than break the caller.
-            logger.debug("EPSS library lookup failed, falling back to HTTP API: %s", exc)
+            # HTTP API rather than break the caller. Was logger.debug before —
+            # invisible under this app's INFO-level logging.basicConfig, which
+            # is exactly why a full report of EPSS: N/A produced zero visible
+            # error: the failure was real, just silent. warning ensures the
+            # next occurrence actually shows up in the logs.
+            logger.warning("EPSS library lookup failed, falling back to HTTP API: %s", exc)
 
     # ------------------------------------------------------------
     # Method 2: FIRST.org Batch HTTP API
@@ -156,7 +170,15 @@ def get_epss_scores(cve_ids: list[str]) -> dict[str, dict]:
 
         response = requests.get(
             _http_endpoint,
-            params={"cve": joined},
+            params={
+                "cve": joined,
+                # FIRST.org's API defaults to 100 results per page with no
+                # error if the batch is larger — a scan with more unique
+                # CVEs than that (this codebase has seen scans with 300+)
+                # would silently get back only the first 100, no different
+                # in effect from Method 1's silent-failure bug above.
+                "limit": max(len(unique_cves), 100),
+            },
             timeout=20,
         )
 
@@ -188,8 +210,11 @@ def get_epss_scores(cve_ids: list[str]) -> dict[str, dict]:
     except (requests.RequestException, ValueError) as exc:
         # requests.RequestException: network/HTTP failure.
         # ValueError: response.json() failed to parse.
-        # EPSS is a best-effort enrichment — don't fail the scan over it.
-        logger.debug("EPSS HTTP API unavailable: %s", exc)
+        # EPSS is a best-effort enrichment — don't fail the scan over it,
+        # but this is the last fallback: if this also fails, EPSS scoring
+        # is completely dead for this request, which is worth knowing about
+        # (was logger.debug before — invisible under INFO-level logging).
+        logger.warning("EPSS HTTP API unavailable: %s", exc)
 
     return result
 

@@ -86,6 +86,13 @@ ENV ZAP_AUTOSTART=true \
 EXPOSE 8000
 
 # Railway (and most PaaS targets) inject $PORT at runtime and expect the
-# app to bind to it — shell form so the variable actually expands, with
-# 8000 as a same-as-local-dev fallback.
-CMD uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}
+# app to bind to it. This needs shell-style ${PORT:-8000} expansion, which
+# JSON-array CMD doesn't support directly — so this wraps it in `sh -c`
+# but with `exec`, which matters here specifically: without `exec`, the
+# shell stays as PID 1 and doesn't forward SIGTERM to uvicorn, so
+# `docker compose down` / Railway redeploys would kill it abruptly after
+# the grace period instead of running the lifespan shutdown handler
+# (closing the DB pool cleanly) that main.py relies on. `exec` replaces
+# the shell process with uvicorn itself, so it becomes PID 1 and receives
+# the signal directly.
+CMD ["sh", "-c", "exec uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"]
