@@ -45,10 +45,15 @@ services:
     env_file:
       - ./secureflow/.env.docker
     environment:
-      # Point the frontend at the backend service by its compose DNS name,
-      # not localhost — localhost inside the frontend container would mean
-      # "this container", not the backend one.
-      - VITE_API_URL=http://backend:8000
+      # NOT http://backend:8000 — that's Docker's internal DNS name, which
+      # only resolves container-to-container. The dashboard routes
+      # (dashboard.findings.tsx, dashboard.reports.tsx, dashboard.settings.tsx)
+      # are plain client components — their fetch calls run in your browser,
+      # which can't see Docker's internal network at all. Since
+      # docker-compose.yml maps the backend's port 8000 straight to the host
+      # (see the backend service's `ports:`), localhost:8000 is what your
+      # browser can actually reach.
+      - VITE_API_URL=http://localhost:8000
     volumes:
       - ./secureflow:/app
       - /app/node_modules
