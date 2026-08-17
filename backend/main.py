@@ -9,6 +9,14 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
+from integrations import store as integrations_store
+
+# The integrations/access-control service (GitHub/GitLab OAuth, container
+# registries, org roles, org-scoped API keys) is deliberately its own
+# isolated FastAPI app with its own tables — see integrations/README.md.
+# It's mounted here so one deployment/one port serves both, without the
+# legacy routes above importing or depending on it in any way.
+from integrations.app import app as integrations_app
 from routes.api_keys import router as api_keys_router
 from routes.compliance import router as compliance_router
 from routes.container import router as container_router
@@ -34,6 +42,13 @@ logger = logging.getLogger("secureflow")
 async def lifespan(app: FastAPI):
     # ── Startup ──────────────────────────────────────────────────────
     init_db()
+    try:
+        integrations_store.initialize()
+    except Exception:
+        # Doesn't block the legacy backend from starting — only matters if
+        # INTEGRATIONS_DATABASE_URL/INTEGRATIONS_ENCRYPTION_KEY aren't set
+        # yet in this environment (e.g. local dev without those secrets).
+        logger.warning("Integrations service tables were not initialized (see integrations/README.md for required env vars).", exc_info=True)
     logger.info("SecureFlow backend startup complete.")
 
     yield
@@ -121,6 +136,11 @@ app.include_router(projects_router)
 app.include_router(compliance_router)
 app.include_router(api_keys_router)
 app.include_router(gate_router)
+
+# Mounted, not included: it's a fully separate ASGI app (own OpenAPI docs at
+# /integrations/docs), so its routes never collide with or fall under the
+# legacy routers' prefixes above.
+app.mount("/integrations", integrations_app)
 
 
 @app.get("/")

@@ -12,3 +12,5 @@ checkov
 python-owasp-zap-v2.4
 epss-api
 python-dotenv
+cryptography
+boto3

@@ -36,8 +36,28 @@ _CLONE_TIMEOUT_SECS = 300
 _CLEANUP_RETRY_DELAY_SECS = 2
 
 
-def clone_repo(repo_url: str):
+def build_authenticated_url(clone_url: str, token: str, provider: str) -> str:
+    """Embed an OAuth token into an HTTPS clone URL for a private repo.
 
+    Only ever used in-process to build the argument passed to `git clone`
+    for this one subprocess call — never logged, never persisted, never
+    returned to a caller. GitHub accepts any non-empty username with the
+    token as the password; GitLab's convention is the `oauth2` username.
+    """
+    if not clone_url.startswith("https://"):
+        raise ValueError("Authenticated clone requires an https:// URL")
+    username = "oauth2" if provider == "gitlab" else "x-access-token"
+    return clone_url.replace("https://", f"https://{username}:{token}@", 1)
+
+
+def clone_repo(repo_url: str, *, log_url: str | None = None):
+    """Clone `repo_url` (which may contain embedded credentials).
+
+    `log_url` — a credential-free URL — is used in log/error messages
+    instead of `repo_url` so an authenticated clone never leaks a token
+    into logs or exception text.
+    """
+    safe_url = log_url or repo_url
     temp_dir = tempfile.mkdtemp(dir=_TMP_ROOT)
 
     try:
@@ -53,17 +73,22 @@ def clone_repo(repo_url: str):
             check=True,
             text=True,
             timeout=_CLONE_TIMEOUT_SECS,
+            capture_output=True,
         )
-    except subprocess.TimeoutExpired as exc:
+    except subprocess.TimeoutExpired:
         cleanup_repo(temp_dir)
         raise RuntimeError(
-            f"git clone did not finish within {_CLONE_TIMEOUT_SECS}s and was "
-            "killed. This usually means a very large repo, a network stall, "
-            "or a private repo that needs credentials this backend doesn't have."
-        ) from exc
-    except subprocess.CalledProcessError:
+            f"git clone of {safe_url} did not finish within {_CLONE_TIMEOUT_SECS}s "
+            "and was killed. This usually means a very large repo, a network "
+            "stall, or a private repo that needs credentials this backend doesn't have."
+        ) from None
+    except subprocess.CalledProcessError as exc:
         cleanup_repo(temp_dir)
-        raise
+        # Re-raised as a plain RuntimeError with a credential-free message —
+        # subprocess.CalledProcessError.__str__ would otherwise include the
+        # full argv, which contains the embedded token for private clones.
+        stderr = (exc.stderr or b"").decode(errors="replace") if isinstance(exc.stderr, bytes) else (exc.stderr or "")
+        raise RuntimeError(f"git clone of {safe_url} failed: {stderr.strip()[-500:]}") from None
 
     return temp_dir
 

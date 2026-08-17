@@ -1,4 +1,5 @@
 import json
+import os
 import shutil
 import subprocess
 
@@ -8,13 +9,20 @@ import subprocess
 _TIMEOUT_SECS = 900
 
 
-def run_container_scan(image_name: str):
+def run_container_scan(image_name: str, env: dict[str, str] | None = None):
     """
     Scan a container image using Trivy.
     Example:
         nginx:latest
         python:3.13
         redis:7
+
+    ``env``, when provided, is merged on top of the current process
+    environment for this subprocess call only — used to hand Trivy
+    short-lived registry credentials (e.g. TRIVY_USERNAME/PASSWORD for
+    Docker Hub/GHCR, or AWS_* for ECR) without ever touching os.environ
+    globally or writing them to disk. Callers that don't pass ``env``
+    keep the exact previous behavior (inherit the parent process env).
     """
 
     trivy_path = shutil.which("trivy")
@@ -33,6 +41,8 @@ def run_container_scan(image_name: str):
         image_name
     ]
 
+    subprocess_env = {**os.environ, **env} if env else None
+
     try:
         result = subprocess.run(
             command,
@@ -42,6 +52,7 @@ def run_container_scan(image_name: str):
             errors="ignore",
             check=False,  # returncode is checked manually below, with our own error message
             timeout=_TIMEOUT_SECS,
+            env=subprocess_env,
         )
     except subprocess.TimeoutExpired as exc:
         raise RuntimeError(
