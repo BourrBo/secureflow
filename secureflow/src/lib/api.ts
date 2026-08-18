@@ -133,6 +133,60 @@ export type ApiBlockingFinding = {
   file?: string;
 };
 
+/* ── Integrations + access control ─────────────────────────────────── */
+
+export type ApiOrgRole = "owner" | "admin" | "security" | "viewer";
+
+export type ApiOrganization = {
+  id: number;
+  name: string;
+  owner_user_id: string;
+  created_at: string;
+};
+
+export type ApiOrgMember = {
+  organization_id: number;
+  user_id: string;
+  role: ApiOrgRole;
+};
+
+export type ApiIntegration = {
+  id: number;
+  organization_id: number;
+  provider: "github" | "gitlab" | "dockerhub" | "ecr" | "ghcr";
+  name: string;
+  metadata: Record<string, unknown>;
+  status: "connected" | "revoked";
+  created_at: string;
+  revoked_at?: string | null;
+};
+
+export type ApiRepository = {
+  id: number | string;
+  full_name: string;
+  name: string;
+  private: boolean;
+  default_branch?: string | null;
+  html_url?: string | null;
+  clone_url?: string | null;
+};
+
+export type ApiRegistryImage = {
+  repository: string;
+  reference_prefix?: string;
+  description?: string | null;
+};
+
+export type ApiOrgApiKey = {
+  id: number;
+  name: string;
+  key_prefix: string;
+  scopes: string[];
+  created_at: string;
+  last_used_at?: string | null;
+  revoked_at?: string | null;
+};
+
 function qs(params: Record<string, unknown>) {
   const sp = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) {
@@ -341,4 +395,111 @@ export const api = {
   /** Generates a report directly from the findings of the scan just run. */
   reportPdfFromFindings: (body: ReportPdfRequest) =>
     requestBlob("/api/reports/pdf", { method: "POST", body: JSON.stringify(body) }),
+
+  /* ── Integrations + access control (isolated service, mounted at /integrations) ── */
+
+  createOrganization: (name: string) =>
+    request<ApiOrganization>("/integrations/organizations", {
+      method: "POST",
+      body: JSON.stringify({ name }),
+    }),
+  upsertMember: (organizationId: number, userId: string, role: ApiOrgRole) =>
+    request<ApiOrgMember>(`/integrations/organizations/${organizationId}/members`, {
+      method: "PUT",
+      body: JSON.stringify({ user_id: userId, role }),
+    }),
+
+  listIntegrations: (organizationId: number) =>
+    request<{ integrations: ApiIntegration[] }>(
+      `/integrations/organizations/${organizationId}/integrations`,
+    ),
+  disconnectIntegration: (organizationId: number, integrationId: number) =>
+    request<{ revoked: boolean }>(
+      `/integrations/organizations/${organizationId}/integrations/${integrationId}`,
+      { method: "DELETE" },
+    ),
+
+  githubAuthorize: (organizationId: number) =>
+    request<{ authorize_url: string }>(
+      `/integrations/github/authorize?organization_id=${organizationId}`,
+    ),
+  githubRepositories: (organizationId: number, integrationId: number) =>
+    request<{ repositories: ApiRepository[] }>(
+      `/integrations/organizations/${organizationId}/integrations/${integrationId}/github/repositories`,
+    ),
+  selectGithubRepository: (organizationId: number, integrationId: number, fullName: string) =>
+    request<{ integration: ApiIntegration; repository: ApiRepository }>(
+      `/integrations/organizations/${organizationId}/integrations/${integrationId}/github/repository`,
+      { method: "PUT", body: JSON.stringify({ full_name: fullName }) },
+    ),
+  scanGithubRepository: (organizationId: number, integrationId: number) =>
+    request<{ repository: ApiRepository; findings: unknown[] }>(
+      `/integrations/organizations/${organizationId}/integrations/${integrationId}/github/scan`,
+      { method: "POST" },
+    ),
+
+  gitlabAuthorize: (organizationId: number) =>
+    request<{ authorize_url: string }>(
+      `/integrations/gitlab/authorize?organization_id=${organizationId}`,
+    ),
+  gitlabRepositories: (organizationId: number, integrationId: number) =>
+    request<{ repositories: ApiRepository[] }>(
+      `/integrations/organizations/${organizationId}/integrations/${integrationId}/gitlab/repositories`,
+    ),
+  selectGitlabRepository: (organizationId: number, integrationId: number, fullName: string) =>
+    request<{ integration: ApiIntegration; repository: ApiRepository }>(
+      `/integrations/organizations/${organizationId}/integrations/${integrationId}/gitlab/repository`,
+      { method: "PUT", body: JSON.stringify({ full_name: fullName }) },
+    ),
+  scanGitlabRepository: (organizationId: number, integrationId: number) =>
+    request<{ repository: ApiRepository; findings: unknown[] }>(
+      `/integrations/organizations/${organizationId}/integrations/${integrationId}/gitlab/scan`,
+      { method: "POST" },
+    ),
+
+  connectRegistry: (
+    organizationId: number,
+    provider: "dockerhub" | "ecr" | "ghcr",
+    name: string,
+    credentials: Record<string, string>,
+  ) =>
+    request<ApiIntegration>(`/integrations/organizations/${organizationId}/registries`, {
+      method: "POST",
+      body: JSON.stringify({ provider, name, credentials }),
+    }),
+  registryImages: (organizationId: number, integrationId: number) =>
+    request<{ images: ApiRegistryImage[] }>(
+      `/integrations/organizations/${organizationId}/integrations/${integrationId}/registries/images`,
+    ),
+  registryImageTags: (organizationId: number, integrationId: number, repository: string) =>
+    request<{ tags: string[] }>(
+      `/integrations/organizations/${organizationId}/integrations/${integrationId}/registries/images/${encodeURIComponent(repository)}/tags`,
+    ),
+  selectRegistryImage: (
+    organizationId: number,
+    integrationId: number,
+    body: { repository: string; reference_prefix: string; tag: string },
+  ) =>
+    request<{ integration: ApiIntegration }>(
+      `/integrations/organizations/${organizationId}/integrations/${integrationId}/registries/image`,
+      { method: "PUT", body: JSON.stringify(body) },
+    ),
+  scanRegistryImage: (organizationId: number, integrationId: number) =>
+    request<{ image: string; findings: unknown[] }>(
+      `/integrations/organizations/${organizationId}/integrations/${integrationId}/registries/scan`,
+      { method: "POST", body: JSON.stringify({}) },
+    ),
+
+  listOrgApiKeys: (organizationId: number) =>
+    request<{ keys: ApiOrgApiKey[] }>(`/integrations/organizations/${organizationId}/api-keys`),
+  createOrgApiKey: (organizationId: number, name: string, scopes: string[]) =>
+    request<ApiOrgApiKey & { key: string }>(
+      `/integrations/organizations/${organizationId}/api-keys`,
+      { method: "POST", body: JSON.stringify({ name, scopes }) },
+    ),
+  revokeOrgApiKey: (organizationId: number, keyId: number) =>
+    request<{ revoked: boolean }>(
+      `/integrations/organizations/${organizationId}/api-keys/${keyId}`,
+      { method: "DELETE" },
+    ),
 };

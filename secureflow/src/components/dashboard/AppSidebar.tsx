@@ -15,6 +15,7 @@ import {
   FileText,
   GitBranch,
   ScrollText,
+  Plug,
   Settings,
 } from "lucide-react";
 import {
@@ -48,6 +49,7 @@ const workspace = [
   { title: "Reports", url: "/dashboard/reports", icon: FileText },
   { title: "Pipeline", url: "/dashboard/pipeline", icon: GitBranch },
   { title: "Compliance", url: "/dashboard/compliance", icon: ScrollText },
+  { title: "Integrations", url: "/dashboard/integrations", icon: Plug },
   { title: "Settings", url: "/dashboard/settings", icon: Settings },
 ];
 

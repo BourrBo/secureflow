@@ -23,6 +23,7 @@ import { Route as DashboardSastRouteImport } from './routes/dashboard.sast'
 import { Route as DashboardReportsRouteImport } from './routes/dashboard.reports'
 import { Route as DashboardProjectsRouteImport } from './routes/dashboard.projects'
 import { Route as DashboardPipelineRouteImport } from './routes/dashboard.pipeline'
+import { Route as DashboardIntegrationsRouteImport } from './routes/dashboard.integrations'
 import { Route as DashboardIacRouteImport } from './routes/dashboard.iac'
 import { Route as DashboardFindingsRouteImport } from './routes/dashboard.findings'
 import { Route as DashboardDastRouteImport } from './routes/dashboard.dast'
@@ -99,6 +100,11 @@ const DashboardPipelineRoute = DashboardPipelineRouteImport.update({
   path: '/pipeline',
   getParentRoute: () => DashboardRoute,
 } as any)
+const DashboardIntegrationsRoute = DashboardIntegrationsRouteImport.update({
+  id: '/integrations',
+  path: '/integrations',
+  getParentRoute: () => DashboardRoute,
+} as any)
 const DashboardIacRoute = DashboardIacRouteImport.update({
   id: '/iac',
   path: '/iac',
@@ -137,6 +143,7 @@ export interface FileRoutesByFullPath {
   '/dashboard/dast': typeof DashboardDastRoute
   '/dashboard/findings': typeof DashboardFindingsRoute
   '/dashboard/iac': typeof DashboardIacRoute
+  '/dashboard/integrations': typeof DashboardIntegrationsRoute
   '/dashboard/pipeline': typeof DashboardPipelineRoute
   '/dashboard/projects': typeof DashboardProjectsRoute
   '/dashboard/reports': typeof DashboardReportsRoute
@@ -157,6 +164,7 @@ export interface FileRoutesByTo {
   '/dashboard/dast': typeof DashboardDastRoute
   '/dashboard/findings': typeof DashboardFindingsRoute
   '/dashboard/iac': typeof DashboardIacRoute
+  '/dashboard/integrations': typeof DashboardIntegrationsRoute
   '/dashboard/pipeline': typeof DashboardPipelineRoute
   '/dashboard/projects': typeof DashboardProjectsRoute
   '/dashboard/reports': typeof DashboardReportsRoute
@@ -179,6 +187,7 @@ export interface FileRoutesById {
   '/dashboard/dast': typeof DashboardDastRoute
   '/dashboard/findings': typeof DashboardFindingsRoute
   '/dashboard/iac': typeof DashboardIacRoute
+  '/dashboard/integrations': typeof DashboardIntegrationsRoute
   '/dashboard/pipeline': typeof DashboardPipelineRoute
   '/dashboard/projects': typeof DashboardProjectsRoute
   '/dashboard/reports': typeof DashboardReportsRoute
@@ -202,6 +211,7 @@ export interface FileRouteTypes {
     | '/dashboard/dast'
     | '/dashboard/findings'
     | '/dashboard/iac'
+    | '/dashboard/integrations'
     | '/dashboard/pipeline'
     | '/dashboard/projects'
     | '/dashboard/reports'
@@ -222,6 +232,7 @@ export interface FileRouteTypes {
     | '/dashboard/dast'
     | '/dashboard/findings'
     | '/dashboard/iac'
+    | '/dashboard/integrations'
     | '/dashboard/pipeline'
     | '/dashboard/projects'
     | '/dashboard/reports'
@@ -243,6 +254,7 @@ export interface FileRouteTypes {
     | '/dashboard/dast'
     | '/dashboard/findings'
     | '/dashboard/iac'
+    | '/dashboard/integrations'
     | '/dashboard/pipeline'
     | '/dashboard/projects'
     | '/dashboard/reports'
@@ -362,6 +374,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DashboardPipelineRouteImport
       parentRoute: typeof DashboardRoute
     }
+    '/dashboard/integrations': {
+      id: '/dashboard/integrations'
+      path: '/integrations'
+      fullPath: '/dashboard/integrations'
+      preLoaderRoute: typeof DashboardIntegrationsRouteImport
+      parentRoute: typeof DashboardRoute
+    }
     '/dashboard/iac': {
       id: '/dashboard/iac'
       path: '/iac'
@@ -406,6 +425,7 @@ interface DashboardRouteChildren {
   DashboardDastRoute: typeof DashboardDastRoute
   DashboardFindingsRoute: typeof DashboardFindingsRoute
   DashboardIacRoute: typeof DashboardIacRoute
+  DashboardIntegrationsRoute: typeof DashboardIntegrationsRoute
   DashboardPipelineRoute: typeof DashboardPipelineRoute
   DashboardProjectsRoute: typeof DashboardProjectsRoute
   DashboardReportsRoute: typeof DashboardReportsRoute
@@ -422,6 +442,7 @@ const DashboardRouteChildren: DashboardRouteChildren = {
   DashboardDastRoute: DashboardDastRoute,
   DashboardFindingsRoute: DashboardFindingsRoute,
   DashboardIacRoute: DashboardIacRoute,
+  DashboardIntegrationsRoute: DashboardIntegrationsRoute,
   DashboardPipelineRoute: DashboardPipelineRoute,
   DashboardProjectsRoute: DashboardProjectsRoute,
   DashboardReportsRoute: DashboardReportsRoute,

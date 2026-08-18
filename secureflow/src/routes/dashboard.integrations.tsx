@@ -1,0 +1,1084 @@
+import { createFileRoute } from "@tanstack/react-router";
+import { useEffect, useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import {
+  PageHeader,
+  Panel,
+  EmptyState,
+  ErrorState,
+  TableSkeleton,
+} from "@/components/dashboard/primitives";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import { api, type ApiIntegration, type ApiOrgRole } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
+import {
+  AlertTriangle,
+  Building2,
+  Copy,
+  Container,
+  Github,
+  GitBranch,
+  KeyRound,
+  Plug,
+  Plus,
+  ScanLine,
+  Trash2,
+  Users,
+} from "lucide-react";
+
+export const Route = createFileRoute("/dashboard/integrations")({
+  validateSearch: (search: Record<string, unknown>) => ({
+    connected: typeof search.connected === "string" ? search.connected : undefined,
+    error: typeof search.error === "string" ? search.error : undefined,
+  }),
+  component: IntegrationsPage,
+});
+
+const ORG_STORAGE_KEY = "secureflow.organization_id";
+const VALID_SCOPES = [
+  "projects:read",
+  "projects:write",
+  "scans:read",
+  "scans:run",
+  "findings:read",
+  "reports:read",
+  "settings:manage",
+  "integrations:manage",
+];
+
+function fmtDate(v?: string | null) {
+  if (!v) return "—";
+  const d = new Date(v);
+  return Number.isNaN(d.getTime()) ? "—" : d.toLocaleDateString();
+}
+
+function errMsg(e: unknown) {
+  return e instanceof Error ? e.message : undefined;
+}
+
+/* ── Organization switcher / creation ────────────────────────────── */
+
+function useOrganizationId() {
+  const [organizationId, setOrganizationIdState] = useState<number | null>(() => {
+    const stored = localStorage.getItem(ORG_STORAGE_KEY);
+    return stored ? Number(stored) : null;
+  });
+  const setOrganizationId = (id: number | null) => {
+    setOrganizationIdState(id);
+    if (id) localStorage.setItem(ORG_STORAGE_KEY, String(id));
+    else localStorage.removeItem(ORG_STORAGE_KEY);
+  };
+  return { organizationId, setOrganizationId };
+}
+
+function OrganizationPanel({
+  organizationId,
+  onSelect,
+}: {
+  organizationId: number | null;
+  onSelect: (id: number) => void;
+}) {
+  const [name, setName] = useState("");
+  const create = useMutation({
+    mutationFn: () => api.createOrganization(name.trim()),
+    onSuccess: (org) => {
+      toast.success(`Organization "${org.name}" created`);
+      onSelect(org.id);
+      setName("");
+    },
+    onError: (e) => toast.error("Could not create organization", { description: errMsg(e) }),
+  });
+
+  return (
+    <Panel
+      title="Organization"
+      description="Every integration, role, and API key belongs to an organization."
+      className="lg:col-span-2"
+    >
+      {organizationId ? (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border/70 bg-secondary/25 p-4">
+          <div>
+            <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+              Active organization
+            </div>
+            <div className="mt-1 text-[13px] font-medium">#{organizationId}</div>
+          </div>
+          <Button variant="outline" size="sm" onClick={() => onSelect(0)}>
+            Switch organization
+          </Button>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          <p className="text-[13px] text-muted-foreground">
+            Create an organization to connect source control, registries, and manage access. You
+            become its Owner automatically.
+          </p>
+          <div className="flex gap-2">
+            <Input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="e.g. Acme Security"
+              className="h-9 max-w-xs text-[13px]"
+            />
+            <Button
+              size="sm"
+              disabled={create.isPending || !name.trim()}
+              onClick={() => create.mutate()}
+            >
+              <Plus className="h-3.5 w-3.5" />{" "}
+              {create.isPending ? "Creating…" : "Create organization"}
+            </Button>
+          </div>
+          <p className="text-[11px] text-muted-foreground">
+            Already have an organization ID from a teammate? Ask them to add you as a member, then
+            enter it below.
+          </p>
+          <OrgIdEntry onSelect={onSelect} />
+        </div>
+      )}
+    </Panel>
+  );
+}
+
+function OrgIdEntry({ onSelect }: { onSelect: (id: number) => void }) {
+  const [raw, setRaw] = useState("");
+  return (
+    <div className="flex gap-2">
+      <Input
+        value={raw}
+        onChange={(e) => setRaw(e.target.value)}
+        placeholder="Organization ID"
+        className="h-8 max-w-[160px] text-[12px]"
+      />
+      <Button
+        variant="outline"
+        size="sm"
+        disabled={!raw.trim() || Number.isNaN(Number(raw))}
+        onClick={() => onSelect(Number(raw))}
+      >
+        Use this org
+      </Button>
+    </div>
+  );
+}
+
+/* ── Members / roles ─────────────────────────────────────────────── */
+
+const ROLE_LABEL: Record<ApiOrgRole, string> = {
+  owner: "Owner",
+  admin: "Admin",
+  security: "Security",
+  viewer: "Viewer",
+};
+
+function MembersPanel({ organizationId }: { organizationId: number }) {
+  const [userId, setUserId] = useState("");
+  const [role, setRole] = useState<ApiOrgRole>("viewer");
+  const upsert = useMutation({
+    mutationFn: () => api.upsertMember(organizationId, userId.trim(), role),
+    onSuccess: (m) => {
+      toast.success(`${m.user_id} is now ${ROLE_LABEL[m.role]}`);
+      setUserId("");
+    },
+    onError: (e) => toast.error("Could not update member", { description: errMsg(e) }),
+  });
+
+  return (
+    <Panel
+      title="Access & roles"
+      description="Owner, Admin, Security, and Viewer — enforced on every request by the backend, not just hidden in the UI."
+      className="lg:col-span-2"
+    >
+      <div className="mb-4 grid gap-3 sm:grid-cols-[1fr,160px,auto]">
+        <div className="space-y-1.5">
+          <Label className="text-[11px]">User ID (Supabase user id)</Label>
+          <Input
+            value={userId}
+            onChange={(e) => setUserId(e.target.value)}
+            placeholder="00000000-0000-0000-0000-000000000000"
+            className="h-9 text-[13px]"
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label className="text-[11px]">Role</Label>
+          <Select value={role} onValueChange={(v) => setRole(v as ApiOrgRole)}>
+            <SelectTrigger className="h-9 text-[13px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="admin">Admin</SelectItem>
+              <SelectItem value="security">Security</SelectItem>
+              <SelectItem value="viewer">Viewer</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="flex items-end">
+          <Button
+            size="sm"
+            className="h-9"
+            disabled={upsert.isPending || !userId.trim()}
+            onClick={() => upsert.mutate()}
+          >
+            {upsert.isPending ? "Saving…" : "Add / update member"}
+          </Button>
+        </div>
+      </div>
+      <div className="grid gap-2 sm:grid-cols-4">
+        {(["owner", "admin", "security", "viewer"] as const).map((r) => (
+          <div key={r} className="rounded-lg border border-border/60 bg-secondary/20 p-3">
+            <div className="text-[12px] font-medium">{ROLE_LABEL[r]}</div>
+            <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+              {r === "owner" && "Full control, including billing-equivalent actions."}
+              {r === "admin" && "Manage members, integrations, API keys, and settings."}
+              {r === "security" && "Run scans and manage projects; no member/settings access."}
+              {r === "viewer" && "Read-only access to projects, scans, findings, reports."}
+            </p>
+          </div>
+        ))}
+      </div>
+    </Panel>
+  );
+}
+
+/* ── Source control: GitHub + GitLab ─────────────────────────────── */
+
+function useIntegrations(organizationId: number) {
+  return useQuery({
+    queryKey: ["integrations", organizationId],
+    queryFn: () => api.listIntegrations(organizationId).then((r) => r.integrations),
+    staleTime: 15_000,
+  });
+}
+
+function SourceControlProvider({
+  organizationId,
+  provider,
+  integrations,
+}: {
+  organizationId: number;
+  provider: "github" | "gitlab";
+  integrations: ApiIntegration[];
+}) {
+  const qc = useQueryClient();
+  const active = integrations.filter((i) => i.provider === provider && i.status === "connected");
+
+  const connect = useMutation({
+    mutationFn: () =>
+      provider === "github"
+        ? api.githubAuthorize(organizationId)
+        : api.gitlabAuthorize(organizationId),
+    onSuccess: (r) => {
+      window.location.href = r.authorize_url;
+    },
+    onError: (e) => toast.error("Could not start OAuth", { description: errMsg(e) }),
+  });
+
+  const disconnect = useMutation({
+    mutationFn: (integrationId: number) => api.disconnectIntegration(organizationId, integrationId),
+    onSuccess: () => {
+      toast.success("Disconnected");
+      qc.invalidateQueries({ queryKey: ["integrations", organizationId] });
+    },
+    onError: (e) => toast.error("Could not disconnect", { description: errMsg(e) }),
+  });
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <p className="text-[12px] text-muted-foreground">
+          {provider === "github"
+            ? "Connect GitHub → authorize → pick a repository → scan."
+            : "Connect GitLab (gitlab.com or self-hosted) → authorize → pick a project → scan."}
+        </p>
+        <Button
+          size="sm"
+          variant="hero"
+          disabled={connect.isPending}
+          onClick={() => connect.mutate()}
+        >
+          <Plug className="h-3.5 w-3.5" /> Connect {provider === "github" ? "GitHub" : "GitLab"}
+        </Button>
+      </div>
+
+      {active.length === 0 ? (
+        <EmptyState
+          icon={provider === "github" ? Github : GitBranch}
+          title={`No ${provider === "github" ? "GitHub" : "GitLab"} connection yet`}
+          description="Connect to browse repositories and run scans without pasting credentials."
+        />
+      ) : (
+        <div className="space-y-3">
+          {active.map((integration) => (
+            <RepositoryCard
+              key={integration.id}
+              organizationId={organizationId}
+              integration={integration}
+              provider={provider}
+              onDisconnect={() => disconnect.mutate(integration.id)}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RepositoryCard({
+  organizationId,
+  integration,
+  provider,
+  onDisconnect,
+}: {
+  organizationId: number;
+  integration: ApiIntegration;
+  provider: "github" | "gitlab";
+  onDisconnect: () => void;
+}) {
+  const qc = useQueryClient();
+  const [browsing, setBrowsing] = useState(false);
+
+  const repos = useQuery({
+    queryKey: ["repositories", provider, organizationId, integration.id],
+    queryFn: () =>
+      provider === "github"
+        ? api.githubRepositories(organizationId, integration.id).then((r) => r.repositories)
+        : api.gitlabRepositories(organizationId, integration.id).then((r) => r.repositories),
+    enabled: browsing,
+  });
+
+  const select = useMutation({
+    mutationFn: (fullName: string) =>
+      provider === "github"
+        ? api.selectGithubRepository(organizationId, integration.id, fullName)
+        : api.selectGitlabRepository(organizationId, integration.id, fullName),
+    onSuccess: () => {
+      toast.success("Repository selected");
+      setBrowsing(false);
+      qc.invalidateQueries({ queryKey: ["integrations", organizationId] });
+    },
+    onError: (e) => toast.error("Could not select repository", { description: errMsg(e) }),
+  });
+
+  const scan = useMutation({
+    mutationFn: () =>
+      provider === "github"
+        ? api.scanGithubRepository(organizationId, integration.id)
+        : api.scanGitlabRepository(organizationId, integration.id),
+    onSuccess: (r) =>
+      toast.success(
+        `Scan complete — ${r.findings.length} finding${r.findings.length === 1 ? "" : "s"}`,
+      ),
+    onError: (e) => toast.error("Scan failed", { description: errMsg(e) }),
+  });
+
+  const selectedRepo = (
+    integration.metadata as { selected_repository?: { full_name?: string; private?: boolean } }
+  )?.selected_repository;
+
+  return (
+    <div className="rounded-lg border border-border/70 bg-secondary/20 p-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <div className="text-[13px] font-medium">{integration.name}</div>
+          <div className="mt-0.5 text-[11px] text-muted-foreground">
+            Connected {fmtDate(integration.created_at)}
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={() => setBrowsing((b) => !b)}>
+            {browsing ? "Hide repositories" : "Browse repositories"}
+          </Button>
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button variant="outline" size="sm" className="text-critical">
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Disconnect {integration.name}?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  Revokes this connection. You'll need to reauthorize to reconnect.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction onClick={onDisconnect}>Disconnect</AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        </div>
+      </div>
+
+      {selectedRepo?.full_name && (
+        <div className="mt-3 flex flex-wrap items-center gap-2 rounded-md border border-primary/30 bg-primary/5 px-3 py-2">
+          <span className="font-mono text-[12px]">{selectedRepo.full_name}</span>
+          {selectedRepo.private && (
+            <Badge variant="outline" className="text-[10px]">
+              private
+            </Badge>
+          )}
+          <Button
+            size="sm"
+            variant="hero"
+            className="ml-auto h-7 text-[11px]"
+            disabled={scan.isPending}
+            onClick={() => scan.mutate()}
+          >
+            <ScanLine className="h-3.5 w-3.5" /> {scan.isPending ? "Scanning…" : "Scan"}
+          </Button>
+        </div>
+      )}
+
+      {browsing && (
+        <div className="mt-3 max-h-64 overflow-y-auto rounded-md border border-border/60">
+          {repos.error ? (
+            <ErrorState error={repos.error} />
+          ) : repos.isLoading ? (
+            <div className="p-3">
+              <TableSkeleton rows={4} cols={1} />
+            </div>
+          ) : (repos.data?.length ?? 0) === 0 ? (
+            <div className="p-4 text-center text-[12px] text-muted-foreground">
+              No accessible repositories found.
+            </div>
+          ) : (
+            <ul className="divide-y divide-border/50">
+              {(repos.data ?? []).map((repo) => (
+                <li
+                  key={repo.id}
+                  className="flex items-center justify-between gap-3 px-3 py-2 text-[12px]"
+                >
+                  <span className="truncate font-mono">{repo.full_name}</span>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-6 shrink-0 text-[11px]"
+                    disabled={select.isPending}
+                    onClick={() => select.mutate(repo.full_name)}
+                  >
+                    Select
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ── Container registries ────────────────────────────────────────── */
+
+const REGISTRY_FIELDS: Record<string, { key: string; label: string; secret?: boolean }[]> = {
+  dockerhub: [
+    { key: "username", label: "Username" },
+    { key: "password", label: "Access token", secret: true },
+  ],
+  ghcr: [
+    { key: "username", label: "GitHub username" },
+    { key: "token", label: "PAT (read:packages)", secret: true },
+  ],
+  ecr: [
+    { key: "access_key_id", label: "Access key ID" },
+    { key: "secret_access_key", label: "Secret access key", secret: true },
+    { key: "region", label: "Region (e.g. us-east-1)" },
+  ],
+};
+
+function RegistriesPanel({
+  organizationId,
+  integrations,
+}: {
+  organizationId: number;
+  integrations: ApiIntegration[];
+}) {
+  const qc = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [provider, setProvider] = useState<"dockerhub" | "ecr" | "ghcr">("dockerhub");
+  const [name, setName] = useState("");
+  const [creds, setCreds] = useState<Record<string, string>>({});
+
+  const registries = integrations.filter(
+    (i) => ["dockerhub", "ecr", "ghcr"].includes(i.provider) && i.status === "connected",
+  );
+
+  const connect = useMutation({
+    mutationFn: () => api.connectRegistry(organizationId, provider, name.trim(), creds),
+    onSuccess: () => {
+      toast.success("Registry connected — credentials verified");
+      setOpen(false);
+      setName("");
+      setCreds({});
+      qc.invalidateQueries({ queryKey: ["integrations", organizationId] });
+    },
+    onError: (e) => toast.error("Could not verify credentials", { description: errMsg(e) }),
+  });
+
+  const disconnect = useMutation({
+    mutationFn: (integrationId: number) => api.disconnectIntegration(organizationId, integrationId),
+    onSuccess: () => {
+      toast.success("Registry disconnected");
+      qc.invalidateQueries({ queryKey: ["integrations", organizationId] });
+    },
+    onError: (e) => toast.error("Could not disconnect", { description: errMsg(e) }),
+  });
+
+  const fields = REGISTRY_FIELDS[provider];
+
+  return (
+    <Panel
+      title="Container registries"
+      description="Docker Hub, Amazon ECR, GHCR — credentials are verified against the real provider before a connection is saved, and never echoed back."
+      className="lg:col-span-2"
+      actions={
+        <Button size="sm" variant="hero" onClick={() => setOpen(true)}>
+          <Plus className="h-3.5 w-3.5" /> Connect registry
+        </Button>
+      }
+    >
+      {registries.length === 0 ? (
+        <EmptyState
+          icon={Container}
+          title="No registries connected"
+          description="Connect a registry to browse images and run container scans."
+        />
+      ) : (
+        <div className="space-y-3">
+          {registries.map((integration) => (
+            <RegistryCard
+              key={integration.id}
+              organizationId={organizationId}
+              integration={integration}
+              onDisconnect={() => disconnect.mutate(integration.id)}
+            />
+          ))}
+        </div>
+      )}
+
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Connect a registry</DialogTitle>
+            <DialogDescription>
+              Credentials are validated live and stored encrypted — this backend never keeps
+              plaintext credentials.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <Label className="text-[11px]">Provider</Label>
+              <Select
+                value={provider}
+                onValueChange={(v) => {
+                  setProvider(v as typeof provider);
+                  setCreds({});
+                }}
+              >
+                <SelectTrigger className="h-9 text-[13px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="dockerhub">Docker Hub</SelectItem>
+                  <SelectItem value="ecr">Amazon ECR</SelectItem>
+                  <SelectItem value="ghcr">GHCR</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-[11px]">Connection name</Label>
+              <Input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="e.g. Prod ECR"
+                className="h-9 text-[13px]"
+              />
+            </div>
+            {fields.map((f) => (
+              <div key={f.key} className="space-y-1.5">
+                <Label className="text-[11px]">{f.label}</Label>
+                <Input
+                  type={f.secret ? "password" : "text"}
+                  value={creds[f.key] ?? ""}
+                  onChange={(e) => setCreds((c) => ({ ...c, [f.key]: e.target.value }))}
+                  className="h-9 text-[13px]"
+                />
+              </div>
+            ))}
+            <DialogFooter>
+              <Button
+                size="sm"
+                disabled={
+                  connect.isPending || !name.trim() || fields.some((f) => !creds[f.key]?.trim())
+                }
+                onClick={() => connect.mutate()}
+              >
+                {connect.isPending ? "Verifying…" : "Connect"}
+              </Button>
+            </DialogFooter>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </Panel>
+  );
+}
+
+function RegistryCard({
+  organizationId,
+  integration,
+  onDisconnect,
+}: {
+  organizationId: number;
+  integration: ApiIntegration;
+  onDisconnect: () => void;
+}) {
+  const qc = useQueryClient();
+  const [browsing, setBrowsing] = useState(false);
+
+  const images = useQuery({
+    queryKey: ["registry-images", organizationId, integration.id],
+    queryFn: () => api.registryImages(organizationId, integration.id).then((r) => r.images),
+    enabled: browsing,
+  });
+
+  const scan = useMutation({
+    mutationFn: () => api.scanRegistryImage(organizationId, integration.id),
+    onSuccess: (r) =>
+      toast.success(
+        `Scanned ${r.image} — ${r.findings.length} finding${r.findings.length === 1 ? "" : "s"}`,
+      ),
+    onError: (e) => toast.error("Scan failed", { description: errMsg(e) }),
+  });
+
+  const selectImage = useMutation({
+    mutationFn: (repository: string) =>
+      api.selectRegistryImage(organizationId, integration.id, {
+        repository,
+        reference_prefix: repository,
+        tag: "latest",
+      }),
+    onSuccess: () => {
+      toast.success("Image selected (tag: latest — adjust before scanning if needed)");
+      qc.invalidateQueries({ queryKey: ["integrations", organizationId] });
+    },
+    onError: (e) => toast.error("Could not select image", { description: errMsg(e) }),
+  });
+
+  const selected = (
+    integration.metadata as { selected_image?: { repository?: string; tag?: string } }
+  )?.selected_image;
+
+  return (
+    <div className="rounded-lg border border-border/70 bg-secondary/20 p-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <div className="flex items-center gap-2 text-[13px] font-medium">
+            {integration.name}
+            <Badge variant="outline" className="text-[10px] uppercase">
+              {integration.provider}
+            </Badge>
+          </div>
+          <div className="mt-0.5 text-[11px] text-muted-foreground">
+            Connected {fmtDate(integration.created_at)}
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={() => setBrowsing((b) => !b)}>
+            {browsing ? "Hide images" : "Browse images"}
+          </Button>
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button variant="outline" size="sm" className="text-critical">
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Disconnect {integration.name}?</AlertDialogTitle>
+                <AlertDialogDescription>Revokes this registry connection.</AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction onClick={onDisconnect}>Disconnect</AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        </div>
+      </div>
+
+      {selected?.repository && (
+        <div className="mt-3 flex flex-wrap items-center gap-2 rounded-md border border-primary/30 bg-primary/5 px-3 py-2">
+          <span className="font-mono text-[12px]">
+            {selected.repository}:{selected.tag}
+          </span>
+          <Button
+            size="sm"
+            variant="hero"
+            className="ml-auto h-7 text-[11px]"
+            disabled={scan.isPending}
+            onClick={() => scan.mutate()}
+          >
+            <ScanLine className="h-3.5 w-3.5" /> {scan.isPending ? "Scanning…" : "Scan"}
+          </Button>
+        </div>
+      )}
+
+      {browsing && (
+        <div className="mt-3 max-h-64 overflow-y-auto rounded-md border border-border/60">
+          {images.error ? (
+            <ErrorState error={images.error} />
+          ) : images.isLoading ? (
+            <div className="p-3">
+              <TableSkeleton rows={4} cols={1} />
+            </div>
+          ) : (images.data?.length ?? 0) === 0 ? (
+            <div className="p-4 text-center text-[12px] text-muted-foreground">
+              No images found.
+            </div>
+          ) : (
+            <ul className="divide-y divide-border/50">
+              {(images.data ?? []).map((img) => (
+                <li
+                  key={img.repository}
+                  className="flex items-center justify-between gap-3 px-3 py-2 text-[12px]"
+                >
+                  <span className="truncate font-mono">{img.repository}</span>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-6 shrink-0 text-[11px]"
+                    disabled={selectImage.isPending}
+                    onClick={() => selectImage.mutate(img.repository)}
+                  >
+                    Select
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ── Org-scoped API keys ─────────────────────────────────────────── */
+
+function OrgApiKeysPanel({ organizationId }: { organizationId: number }) {
+  const qc = useQueryClient();
+  const keys = useQuery({
+    queryKey: ["org-api-keys", organizationId],
+    queryFn: () => api.listOrgApiKeys(organizationId).then((r) => r.keys),
+  });
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [scopes, setScopes] = useState<string[]>(["scans:run", "findings:read"]);
+  const [rawKey, setRawKey] = useState<string | null>(null);
+
+  const create = useMutation({
+    mutationFn: () => api.createOrgApiKey(organizationId, name.trim(), scopes),
+    onSuccess: (r) => setRawKey(r.key),
+    onError: (e) => toast.error("Could not create key", { description: errMsg(e) }),
+  });
+
+  const revoke = useMutation({
+    mutationFn: (id: number) => api.revokeOrgApiKey(organizationId, id),
+    onSuccess: () => {
+      toast.success("Key revoked");
+      qc.invalidateQueries({ queryKey: ["org-api-keys", organizationId] });
+    },
+    onError: (e) => toast.error("Could not revoke key", { description: errMsg(e) }),
+  });
+
+  const closeDialog = () => {
+    setOpen(false);
+    setRawKey(null);
+    setName("");
+    setScopes(["scans:run", "findings:read"]);
+    create.reset();
+    qc.invalidateQueries({ queryKey: ["org-api-keys", organizationId] });
+  };
+
+  return (
+    <Panel
+      title="Organization API keys"
+      description="Scoped keys for CI/CD, shown once at creation and stored only as a hash."
+      className="lg:col-span-2"
+      actions={
+        <Button variant="hero" size="sm" onClick={() => setOpen(true)}>
+          <Plus className="h-3.5 w-3.5" /> Create key
+        </Button>
+      }
+    >
+      {keys.error ? (
+        <ErrorState error={keys.error} />
+      ) : keys.isLoading ? (
+        <TableSkeleton rows={3} cols={4} />
+      ) : (keys.data?.length ?? 0) === 0 ? (
+        <EmptyState icon={KeyRound} title="No organization API keys yet" />
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-[12px]">
+            <thead>
+              <tr className="border-b border-border/60 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                <th className="py-2 pr-3 font-normal">Name</th>
+                <th className="py-2 pr-3 font-normal">Key</th>
+                <th className="py-2 pr-3 font-normal">Scopes</th>
+                <th className="py-2 pr-3 font-normal">Created</th>
+                <th className="py-2 font-normal" />
+              </tr>
+            </thead>
+            <tbody>
+              {(keys.data ?? []).map((k) => {
+                const revoked = Boolean(k.revoked_at);
+                return (
+                  <tr key={k.id} className="border-b border-border/40">
+                    <td className="py-2 pr-3">{k.name}</td>
+                    <td className="py-2 pr-3 font-mono">{k.key_prefix}••••••••</td>
+                    <td className="py-2 pr-3">
+                      <div className="flex flex-wrap gap-1">
+                        {k.scopes.map((s) => (
+                          <Badge key={s} variant="outline" className="text-[9px]">
+                            {s}
+                          </Badge>
+                        ))}
+                      </div>
+                    </td>
+                    <td className="py-2 pr-3">{fmtDate(k.created_at)}</td>
+                    <td className="py-2 text-right">
+                      {revoked ? (
+                        <span className="text-[11px] text-muted-foreground">Revoked</span>
+                      ) : (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-7 text-[11px]"
+                          onClick={() => revoke.mutate(k.id)}
+                        >
+                          Revoke
+                        </Button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <Dialog open={open} onOpenChange={(o) => (o ? setOpen(true) : closeDialog())}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{rawKey ? "Key created" : "Create organization API key"}</DialogTitle>
+            <DialogDescription>
+              {rawKey ? "Store this key now — it won't be shown again." : "Pick a name and scopes."}
+            </DialogDescription>
+          </DialogHeader>
+          {rawKey ? (
+            <div className="space-y-3">
+              <div className="flex items-start gap-2 rounded-lg border border-warning/40 bg-warning/10 p-3 text-[12px] text-warning">
+                <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                <span>This is the only time you'll see this key — copy it now.</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Input readOnly value={rawKey} className="h-9 font-mono text-[12px]" />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(rawKey);
+                      toast.success("Key copied");
+                    } catch {
+                      toast.error("Could not copy to clipboard");
+                    }
+                  }}
+                >
+                  <Copy className="h-3.5 w-3.5" /> Copy
+                </Button>
+              </div>
+              <DialogFooter>
+                <Button size="sm" onClick={closeDialog}>
+                  Done
+                </Button>
+              </DialogFooter>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="space-y-1.5">
+                <Label className="text-[11px]">Name</Label>
+                <Input
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="e.g. GitHub Actions — prod"
+                  className="h-9 text-[13px]"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-[11px]">Scopes</Label>
+                <div className="grid grid-cols-2 gap-2">
+                  {VALID_SCOPES.map((s) => (
+                    <label key={s} className="flex items-center gap-2 text-[12px]">
+                      <Checkbox
+                        checked={scopes.includes(s)}
+                        onCheckedChange={(checked) =>
+                          setScopes((prev) =>
+                            checked ? [...prev, s] : prev.filter((x) => x !== s),
+                          )
+                        }
+                      />
+                      <span className="font-mono">{s}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+              <DialogFooter>
+                <Button
+                  size="sm"
+                  disabled={create.isPending || !name.trim() || scopes.length === 0}
+                  onClick={() => create.mutate()}
+                >
+                  {create.isPending ? "Creating…" : "Create"}
+                </Button>
+              </DialogFooter>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+    </Panel>
+  );
+}
+
+/* ── Page ─────────────────────────────────────────────────────────── */
+
+function IntegrationsPage() {
+  const { user } = useAuth();
+  const { organizationId, setOrganizationId } = useOrganizationId();
+  const search = Route.useSearch();
+
+  useEffect(() => {
+    if (search?.connected) {
+      toast.success(`${search.connected === "github" ? "GitHub" : "GitLab"} connected`);
+    } else if (search?.error) {
+      toast.error("Connection failed", { description: search.error });
+    }
+  }, [search?.connected, search?.error]);
+
+  const integrationsQuery = useIntegrations(organizationId ?? 0);
+  const integrations = useMemo(
+    () => (organizationId ? (integrationsQuery.data ?? []) : []),
+    [organizationId, integrationsQuery.data],
+  );
+
+  return (
+    <>
+      <PageHeader
+        eyebrow="Workspace"
+        title="Integrations & access"
+        description="Connect source control and container registries, and manage who on your team can do what."
+      />
+      <div className="grid gap-5 lg:grid-cols-2">
+        <OrganizationPanel organizationId={organizationId} onSelect={setOrganizationId} />
+
+        {organizationId ? (
+          <>
+            <MembersPanel organizationId={organizationId} />
+
+            <Panel
+              title="Source control"
+              description="Connect GitHub → OAuth → repository list → select repo → scan."
+              className="lg:col-span-2"
+            >
+              {integrationsQuery.error ? (
+                <ErrorState error={integrationsQuery.error} />
+              ) : integrationsQuery.isLoading ? (
+                <TableSkeleton rows={3} cols={1} />
+              ) : (
+                <Tabs defaultValue="github">
+                  <TabsList>
+                    <TabsTrigger value="github">
+                      <Github className="h-3.5 w-3.5" /> GitHub
+                    </TabsTrigger>
+                    <TabsTrigger value="gitlab">
+                      <GitBranch className="h-3.5 w-3.5" /> GitLab
+                    </TabsTrigger>
+                  </TabsList>
+                  <TabsContent value="github" className="pt-4">
+                    <SourceControlProvider
+                      organizationId={organizationId}
+                      provider="github"
+                      integrations={integrations}
+                    />
+                  </TabsContent>
+                  <TabsContent value="gitlab" className="pt-4">
+                    <SourceControlProvider
+                      organizationId={organizationId}
+                      provider="gitlab"
+                      integrations={integrations}
+                    />
+                  </TabsContent>
+                </Tabs>
+              )}
+              <p className="mt-4 text-[11px] text-muted-foreground">
+                Bitbucket support follows once this pattern has been in production for both
+                providers above.
+              </p>
+            </Panel>
+
+            <RegistriesPanel organizationId={organizationId} integrations={integrations} />
+
+            <OrgApiKeysPanel organizationId={organizationId} />
+          </>
+        ) : (
+          <Panel title="Get started" className="lg:col-span-2">
+            <EmptyState
+              icon={Building2}
+              title="Create or select an organization above"
+              description="Organizations scope every integration, role, and API key so nothing is tied to a single personal account."
+            />
+          </Panel>
+        )}
+      </div>
+      {user && (
+        <p className="mt-4 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+          <Users className="h-3 w-3" /> Signed in as {user.email} — your user ID for member
+          management is <span className="font-mono">{user.id}</span>.
+        </p>
+      )}
+    </>
+  );
+}
