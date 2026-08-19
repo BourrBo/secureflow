@@ -24,47 +24,86 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# DAST scans run against a single shared ZAP instance/session (see
-# zap_runner.py's per-scan zap.core.new_session() call). Running two scans
-# at once would have them race to reset/use that same session, so scans are
-# serialized here rather than trying to make ZAP itself handle concurrency.
+# DAST scans run against a single shared ZAP instance/session.
 _zap_scan_lock = threading.Lock()
 
 
-def _run_dast_scan_background(user_id: str, project_id: int, scan_id: int, target_url: str, scan_mode: str) -> None:
-    """
-    Runs the actual ZAP scan on a worker thread so the HTTP request that
-    triggered it can return immediately. user_id/project_id are captured
-    from the original request here — there's no FastAPI request context
-    (and therefore no Depends()) left once this is running on its own
-    thread, so they're passed in explicitly instead.
-    """
+def _get_live_active_scan() -> dict | None:
+    """Best-effort live telemetry from the currently running ZAP active scan."""
+    try:
+        from zapv2 import ZAPv2
+        from utils.zap_utils import get_zap_config
+
+        config = get_zap_config()
+        zap = ZAPv2(
+            apikey=config["api_key"] or None,
+            proxies=config["proxies"],
+        )
+
+        scans = zap.ascan.scans() or []
+        running = [
+            scan for scan in scans
+            if str(scan.get("state", "")).upper() == "RUNNING"
+        ]
+
+        # Some ZAP versions don't expose state consistently. If there is only
+        # one active-scan entry, use it as a fallback while SecureFlow's own
+        # scan row says the DAST scan is running.
+        scan = running[-1] if running else (scans[-1] if len(scans) == 1 else None)
+        if not scan:
+            return None
+
+        def _as_int(value):
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                return None
+
+        requests = _as_int(
+            scan.get("reqCount")
+            or scan.get("requestCount")
+            or scan.get("requests")
+        )
+        alerts = _as_int(
+            scan.get("alertCount")
+            or scan.get("alerts")
+        )
+        progress = _as_int(scan.get("progress"))
+
+        return {
+            "requests": requests,
+            "progress": progress,
+            "state": str(scan.get("state") or "RUNNING").upper(),
+            "alerts": alerts,
+        }
+    except Exception:
+        # Telemetry must never break the scan/status endpoint. The frontend
+        # falls back to an indeterminate Active Scan display when unavailable.
+        logger.debug("Could not read live ZAP active-scan telemetry", exc_info=True)
+        return None
+
+
+def _run_dast_scan_background(
+    user_id: str,
+    project_id: int,
+    scan_id: int,
+    target_url: str,
+    scan_mode: str,
+) -> None:
+    """Run ZAP on a worker thread so the POST request returns immediately."""
+
     def on_progress(phase: str, pct: int | None) -> None:
-        # Best-effort — a progress update failing (e.g. a transient DB
-        # hiccup) must never take down the scan itself.
         try:
             update_scan_progress(user_id, scan_id, phase, pct)
         except Exception:
             logger.debug("Failed to write progress for scan #%s", scan_id, exc_info=True)
 
     def _safe_finish_scan(status: str, error_message: str | None = None) -> None:
-        # finish_scan() itself can fail (e.g. the same transient DB issue
-        # that caused the scan to fail in the first place — see scan #15 in
-        # server.log, where finish_scan("failed", ...) threw a SECOND
-        # unhandled OperationalError and killed this background thread
-        # before the scan could even be marked "failed"). That left the
-        # scan permanently stuck on "running" with no findings and no error
-        # message — the frontend would poll it forever. db_service.get_db()
-        # now retries transient failures on its own (see services/db_service
-        # .py), so this should rarely be needed, but this call must never be
-        # allowed to raise: it is the last thing standing between a failed
-        # scan and one that just silently disappears.
         try:
             finish_scan(user_id, scan_id, status, error_message=error_message)
         except Exception:
             logger.critical(
-                "Could not mark DAST scan #%s as '%s' in the DB — it will "
-                "stay stuck on 'running' until manually corrected. "
+                "Could not mark DAST scan #%s as '%s' in the DB. "
                 "Underlying scan error (if any): %s",
                 scan_id,
                 status,
@@ -101,21 +140,13 @@ def _run_dast_scan_background(user_id: str, project_id: int, scan_id: int, targe
         _safe_finish_scan("failed", error_message=str(exc))
 
     except Exception as exc:
-        # background thread with no request/response cycle left to catch
-        # it; anything unexpected must still mark the scan failed with a
-        # reason, or it would sit as "running" forever.
         logger.exception("Unexpected DAST error on scan #%s", scan_id)
         _safe_finish_scan("failed", error_message=str(exc))
 
 
 @router.post("/api/dast/scan")
 def scan_dast(request: DastScanRequest, user_id: str = Depends(get_current_user_id)):
-    """
-    Kicks off a DAST scan against a running web application and returns
-    immediately with a scan_id — it does NOT wait for the scan to finish.
-    Poll GET /api/dast/scan/{scan_id} for status and, once completed, the
-    findings.
-    """
+    """Queue a background DAST scan and immediately return its scan_id."""
     project_id = get_or_create_project(
         user_id,
         name=request.target_url,
@@ -148,14 +179,7 @@ def scan_dast(request: DastScanRequest, user_id: str = Depends(get_current_user_
 
 @router.get("/api/dast/scan/{scan_id}")
 def get_dast_scan_status(scan_id: int, user_id: str = Depends(get_current_user_id)):
-    """
-    Poll this while a scan is running. Short-lived request by design — safe
-    to call every few seconds even over a flaky tunnel, unlike waiting on
-    the original POST for the scan's entire duration. progress_phase /
-    progress_pct reflect real backend state (written by zap_runner.py as it
-    moves through spider/AJAX-spider/active-scan) — not a synthetic
-    frontend animation.
-    """
+    """Return persisted DAST status plus best-effort live Active Scan telemetry."""
     scan = get_scan(user_id, scan_id)
     if not scan or scan["scan_type"] != "dast":
         raise HTTPException(status_code=404, detail="DAST scan not found")
@@ -168,7 +192,19 @@ def get_dast_scan_status(scan_id: int, user_id: str = Depends(get_current_user_i
         "finished_at": scan["finished_at"],
         "progress_phase": scan.get("progress_phase"),
         "progress_pct": scan.get("progress_pct"),
+        "active_scan_requests": None,
+        "active_scan_progress": None,
+        "active_scan_state": None,
+        "active_scan_alerts": None,
     }
+
+    if status == "running" and "active" in str(scan.get("progress_phase") or "").lower():
+        live = _get_live_active_scan()
+        if live:
+            response["active_scan_requests"] = live["requests"]
+            response["active_scan_progress"] = live["progress"]
+            response["active_scan_state"] = live["state"]
+            response["active_scan_alerts"] = live["alerts"]
 
     if status == "completed":
         findings, _total = list_findings(user_id, scan_id=scan_id)

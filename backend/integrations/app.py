@@ -141,6 +141,13 @@ def create_organization(payload: OrganizationCreate, user_id: str = Depends(curr
     return store.create_organization(payload.name.strip(), user_id)
 
 
+@app.get("/organizations")
+def list_my_organizations(user_id: str = Depends(current_user_id)):
+    """Organizations the current user belongs to, for the frontend's
+    "Switch organization" picker."""
+    return {"organizations": store.list_organizations_for_user(user_id)}
+
+
 @app.put("/organizations/{organization_id}/members")
 def upsert_member(organization_id: int, payload: MemberUpsert, user_id: str = Depends(current_user_id)):
     _assert(organization_id, user_id, "members:manage")

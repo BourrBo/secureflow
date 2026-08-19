@@ -2,6 +2,7 @@
 __pycache__/
 *.pyc
 *.pyo
+*.pyd
 .venv/
 venv/
 
@@ -9,6 +10,7 @@ venv/
 .env
 .env.*
 !.env.example
+!.env.docker.example
 
 # Database
 *.db
@@ -20,7 +22,39 @@ tmp_scans/
 test_repo.zip
 *.zip
 
+# Third-party tool installs — never commit these
+Tools/
+
+# Node / frontend build
+node_modules/
+dist/
+dist-ssr/
+.output/
+.vinxi/
+.tanstack/**
+.nitro/
+*.local
+
+# Wrangler / Cloudflare
+.wrangler/
+.dev.vars
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
 # Editors / OS
-.vscode/
+.vscode/*
+!.vscode/extensions.json
 .idea/
 .DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?

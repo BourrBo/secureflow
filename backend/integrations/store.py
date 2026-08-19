@@ -76,6 +76,25 @@ def role_for(organization_id: int, user_id: str) -> str | None:
         return row["role"] if row else None
 
 
+def list_organizations_for_user(user_id: str) -> list[dict]:
+    """Every organization this user belongs to, with their role in each.
+
+    Backs the "Switch organization" picker — without this, the frontend
+    has no way to show a user their own orgs and can only reset to a
+    blank create-or-enter-ID screen.
+    """
+    with db() as conn, conn.cursor() as cur:
+        cur.execute(
+            """SELECT o.id, o.name, m.role
+               FROM sf_organizations o
+               JOIN sf_organization_members m ON m.organization_id = o.id
+               WHERE m.user_id = %s
+               ORDER BY o.created_at DESC""",
+            (user_id,),
+        )
+        return [dict(row) for row in cur.fetchall()]
+
+
 def add_member(organization_id: int, user_id: str, role: str) -> dict:
     with db() as conn, conn.cursor() as cur:
         cur.execute("""INSERT INTO sf_organization_members (organization_id,user_id,role) VALUES (%s,%s,%s)
