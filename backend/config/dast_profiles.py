@@ -5,8 +5,18 @@
 # as a hard cutoff, so any real site that took longer than that got its
 # scan cut off mid-way and returned as "complete" with partial results.
 #
-# What still varies by profile is *scope*, not duration: whether the AJAX
-# spider and active scanner run at all.
+# What varies by profile is scope (AJAX spider, active scan) AND, as of
+# this revision, aggressiveness (attack_strength / alert_threshold).
+# Previously every profile that ran an active scan got the exact same
+# INSANE + LOW settings applied in _maximize_scan_thoroughness() — the
+# profile only controlled whether the active scanner ran at all, not how
+# aggressively. That made "Standard" and "Full" behave almost identically
+# in practice (same payload volume, same noise, same runtime) except for
+# AJAX crawling, which defeats the point of having three profiles.
+#
+# attack_strength / alert_threshold accept ZAP's own values:
+#   attack_strength : LOW | MEDIUM | HIGH | INSANE
+#   alert_threshold : OFF | LOW | MEDIUM | HIGH
 SCAN_PROFILES: dict[str, dict] = {
     "quick": {
         "name": "Quick Scan",
@@ -16,25 +26,33 @@ SCAN_PROFILES: dict[str, dict] = {
         ),
         "enable_active_scan": False,
         "enable_ajax_spider": False,
+        "attack_strength": None,
+        "alert_threshold": None,
     },
 
     "standard": {
         "name": "Standard Scan",
         "description": (
             "Recommended profile for most applications. Performs spider, "
-            "passive analysis and active scanning."
+            "passive analysis and active scanning at HIGH strength — "
+            "thorough without the runtime/noise cost of INSANE."
         ),
         "enable_active_scan": True,
         "enable_ajax_spider": False,
+        "attack_strength": "HIGH",
+        "alert_threshold": "MEDIUM",
     },
 
     "full": {
         "name": "Full Scan",
         "description": (
             "Maximum coverage profile. Performs traditional spider, "
-            "AJAX spider, passive analysis and active scanning."
+            "AJAX spider, passive analysis and active scanning at INSANE "
+            "strength with the LOW (most sensitive) alert threshold."
         ),
         "enable_active_scan": True,
         "enable_ajax_spider": True,
+        "attack_strength": "INSANE",
+        "alert_threshold": "LOW",
     },
 }

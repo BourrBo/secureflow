@@ -44,17 +44,38 @@ def _prevent_windows_sleep():
 
 # A genuine "let it fully finish" scan has no natural time limit — a large
 # real-world site can legitimately take hours of active scanning. This is
-# NOT the timeout that used to cut scans off early (that one is gone: see
-# _poll_until below, which waits on ZAP's own completion signal, not a
-# clock). This is only a last-resort safety valve so a single stuck ZAP
-# rule/host can't hold the global scan lock (see routes/dast.py) hostage
-# forever if something on the ZAP side genuinely wedges. In the normal
-# case this is never hit.
+# only a last-resort safety valve so a single stuck ZAP rule/host can't
+# hold the global scan lock (see routes/dast.py) hostage forever if
+# something on the ZAP side genuinely wedges. In the normal case this is
+# never hit — and when it IS hit, the scan now ends as TIMED_OUT rather
+# than silently looking like a normal COMPLETED run with partial results.
 _SAFETY_CEILING_SECS = 4 * 60 * 60  # 4 hours
+
+# Active-scan stall recovery (Priority 2). A scan is only considered
+# stalled if BOTH the reported percentage AND the request count are
+# unchanged for this long — percentage alone is not trustworthy (ZAP can
+# sit at 0% for a long time while genuinely sending thousands of
+# requests). This is a recovery mechanism for a wedged rule, not the
+# normal path, so the window is deliberately generous.
+_STALL_WINDOW_SECS = 5 * 60  # 5 minutes
+
+# Terminal/([intermediate]) phase outcomes returned by _poll_until().
+OUTCOME_COMPLETED = "completed"
+OUTCOME_TIMED_OUT = "timed_out"
+OUTCOME_CANCELLED = "cancelled"
 
 
 class ZapScanError(RuntimeError):
     """Raised for any failure during the ZAP scan lifecycle."""
+
+
+class ZapScanCancelled(RuntimeError):
+    """Raised internally when a cooperative cancellation request is observed."""
+
+
+class ZapScanTimedOut(RuntimeError):
+    """Raised when the outer safety ceiling is hit for a phase that has no
+    well-defined 'proceed with partial results' behavior (e.g. spider)."""
 
 
 def _import_zap_client():
@@ -76,18 +97,16 @@ def _poll_until(
     progress_fn=None,
     pct_fn=None,
     on_progress=None,
+    cancel_fn=None,
     interval_secs: float = 2.0,
     log_every_secs: float = 10.0,
 ):
     """
     Waits for `condition_fn()` to become true — i.e. for ZAP itself to
-    report a phase complete — with no external deadline. The previous
-    version of this function gave up after a fixed timeout and moved on
-    with whatever partial results existed at that point, which is why
-    "active scan" never looked like it was doing much: it was being
-    interrupted mid-run on anything but a tiny site. The only thing that
-    stops this loop now is ZAP finishing the phase, or the outer safety
-    ceiling in run_zap_scan() as an absolute last resort.
+    report a phase complete — with no external deadline. The only things
+    that stop this loop are: ZAP finishing the phase (-> "completed"), a
+    cooperative cancellation request becoming true (-> "cancelled"), or
+    the outer safety ceiling as an absolute last resort (-> "timed_out").
 
     `pct_fn`, if given, returns this phase's own 0-100 progress (or None
     for phases ZAP doesn't report a percentage for, like the passive scan
@@ -95,6 +114,11 @@ def _poll_until(
     closure that writes to the scans row — is called at the same throttled
     cadence as the log line, so a caller polling the API sees real,
     backend-verified progress rather than a bare spinner.
+
+    `cancel_fn`, if given, is polled at the same cadence as the safety
+    ceiling check (every loop iteration — cancellation should feel
+    responsive, not throttled) and should return True once the user has
+    asked to cancel the scan.
     """
     start = time.time()
     last_log = 0.0
@@ -111,20 +135,24 @@ def _poll_until(
             )
             if on_progress:
                 on_progress(phase, 100)
-            return True
+            return OUTCOME_COMPLETED
+
+        if cancel_fn and cancel_fn():
+            logger.info("DAST %s phase cancelled by user request (%.0fs elapsed)", phase, time.time() - start)
+            return OUTCOME_CANCELLED
 
         elapsed = time.time() - start
 
         if elapsed >= _SAFETY_CEILING_SECS:
             logger.warning(
-                "DAST %s phase hit the %.0fs safety ceiling — proceeding "
-                "with partial results. This should be rare; if it happens "
-                "often, something on the ZAP side is likely stuck rather "
-                "than the target genuinely needing longer.",
+                "DAST %s phase hit the %.0fs safety ceiling. This should be "
+                "rare; if it happens often, something on the ZAP side is "
+                "likely stuck rather than the target genuinely needing "
+                "longer.",
                 phase,
                 _SAFETY_CEILING_SECS,
             )
-            return False
+            return OUTCOME_TIMED_OUT
 
         if elapsed - last_log >= log_every_secs:
             if progress_fn:
@@ -147,18 +175,24 @@ def _poll_until(
         time.sleep(interval_secs)
 
 
-def _wait_for_passive_scan(zap, on_progress=None, timeout=120):
+def _wait_for_passive_scan(zap, on_progress=None, cancel_fn=None):
     logger.info("Waiting for passive scan to finish...")
 
-    _poll_until(
+    outcome = _poll_until(
         lambda: int(zap.pscan.records_to_scan) == 0,
         phase="passive scan",
         progress_fn=lambda: f"{zap.pscan.records_to_scan} records left",
         on_progress=on_progress,
+        cancel_fn=cancel_fn,
     )
+    if outcome == OUTCOME_CANCELLED:
+        raise ZapScanCancelled("Cancelled while waiting for passive scan")
+    # A passive-scan phase hitting the safety ceiling isn't fatal — the
+    # queue just keeps draining in the background — so we proceed either way.
+    return outcome
 
 
-def _run_spider(zap, target_url, on_progress=None):
+def _run_spider(zap, target_url, on_progress=None, cancel_fn=None):
     logger.info("Spider Scan starting (unlimited duration)")
 
     try:
@@ -187,25 +221,35 @@ def _run_spider(zap, target_url, on_progress=None):
         logger.exception("Failed to start spider scan")
         raise ZapScanError(f"Failed to start spider scan: {exc}") from exc
 
-    finished = _poll_until(
+    outcome = _poll_until(
         lambda: int(zap.spider.status(spider_scan_id)) >= 100,
         phase="spider",
         progress_fn=lambda: f"{zap.spider.status(spider_scan_id)}%",
         pct_fn=lambda: int(zap.spider.status(spider_scan_id)),
         on_progress=on_progress,
+        cancel_fn=cancel_fn,
     )
 
-    if not finished:
+    if outcome != OUTCOME_COMPLETED:
         try:
             zap.spider.stop(spider_scan_id)
         except Exception as exc:  # noqa: BLE001 — best-effort cleanup;
             # any failure to stop is non-fatal, but shouldn't be silent.
             logger.debug("Failed to stop spider scan %s: %s", spider_scan_id, exc)
 
-    return finished
+    if outcome == OUTCOME_CANCELLED:
+        raise ZapScanCancelled("Cancelled during spider phase")
+
+    return outcome
 
 
-def _run_ajax_spider(zap, target_url, on_progress=None):
+def _run_ajax_spider(zap, target_url, on_progress=None, cancel_fn=None) -> str:
+    """Returns one of: 'completed', 'timed_out', 'failed_to_start'.
+    Never raises for a plain start failure — that used to be silently
+    swallowed (Priority 6); it's now reported back to the caller instead,
+    which persists it to scans.ajax_spider_status so the UI/report can say
+    'AJAX Spider: Failed' instead of implying the Full scan was clean.
+    """
     logger.info("AJAX Spider starting (unlimited duration)")
 
     try:
@@ -214,109 +258,249 @@ def _run_ajax_spider(zap, target_url, on_progress=None):
         zap.ajaxSpider.set_option_max_crawl_states(0)  # 0 = unlimited
         zap.ajaxSpider.scan(target_url)
     except Exception as exc:  # noqa: BLE001 — zapv2 has no documented
-        # exception hierarchy; treat any failure to start as non-fatal.
+        # exception hierarchy; treat any failure to start as non-fatal to
+        # the overall scan, but make it visible rather than silent.
         logger.warning("Unable to start AJAX spider: %s", exc)
-        return False
+        return "failed_to_start"
 
-    finished = _poll_until(
+    outcome = _poll_until(
         lambda: zap.ajaxSpider.status.lower() == "stopped",
         phase="ajax spider",
         interval_secs=3,
         progress_fn=lambda: zap.ajaxSpider.status,
         on_progress=on_progress,
+        cancel_fn=cancel_fn,
     )
 
-    if not finished:
+    if outcome != OUTCOME_COMPLETED:
         try:
             zap.ajaxSpider.stop()
         except Exception as exc:  # noqa: BLE001 — best-effort cleanup;
             # any failure to stop is non-fatal, but shouldn't be silent.
             logger.debug("Failed to stop AJAX spider: %s", exc)
 
-    return finished
+    if outcome == OUTCOME_CANCELLED:
+        raise ZapScanCancelled("Cancelled during AJAX spider phase")
+
+    return outcome  # "completed" or "timed_out"
 
 
-def _maximize_scan_thoroughness(zap):
+def _apply_attack_strength(zap, attack_strength: str, alert_threshold: str) -> tuple[int, int]:
     """
-    Pushes every ZAP setting that trades speed/noise for coverage as far as
-    it goes: every active-scan rule enabled (not just the default subset),
-    maximum attack strength (most payload variations tried per parameter),
-    and lowest alert threshold (most sensitive — reports weaker-confidence
-    findings too, rather than only the certain ones). Also enables every
-    passive-scan rule, since those run for free on every response ZAP sees
-    regardless of active scanning.
+    Applies `attack_strength`/`alert_threshold` to every active-scan rule.
+    Returns (applied, total) so the caller can report real coverage
+    (Priority 7) instead of silently continuing on partial failure.
 
-    Attack strength/threshold are set per individual scan rule (each rule
-    returned by ascan.scanners() has its own id) rather than via
-    set_policy_attack_strength()/set_policy_alert_threshold() — those two
-    take an `id` that refers to a scan-policy *category* node, not "the
-    whole policy", and passing a strength string in that slot the first
-    time this was written just raised a missing-argument TypeError. Setting
-    it per-rule is slower (one call per rule) but unambiguous and matches
-    exactly what enable_all_scanners() just enabled.
+    Set per-rule (each rule returned by ascan.scanners() has its own id)
+    rather than via set_policy_attack_strength()/set_policy_alert_threshold()
+    — those two take an `id` that refers to a scan-policy *category* node,
+    not "the whole policy". Slower (one call per rule) but unambiguous.
+    """
+    scanners = zap.ascan.scanners()
+    applied = 0
+    for scanner in scanners:
+        scanner_id = scanner.get("id")
+        if scanner_id is None:
+            continue
+        try:
+            zap.ascan.set_scanner_attack_strength(scanner_id, attack_strength)
+            zap.ascan.set_scanner_alert_threshold(scanner_id, alert_threshold)
+            applied += 1
+        except Exception as exc:  # noqa: BLE001 — keep going; report the
+            # shortfall at the end rather than aborting the whole scan
+            # over one rule ZAP wouldn't configure.
+            logger.debug("Could not configure rule %s: %s", scanner_id, exc)
+    return applied, len(scanners)
 
-    This trades some false-positive rate and scan time for the "don't miss
-    anything" goal — the right tradeoff for a tool whose job is finding
-    vulnerabilities, not for a CI gate that needs to stay quiet on noise.
+
+def _maximize_scan_thoroughness(zap, attack_strength: str, alert_threshold: str) -> str:
+    """
+    Enables every passive/active scan rule, then applies `attack_strength`
+    / `alert_threshold` (profile-specific — see config/dast_profiles.py) to
+    every active rule.
+
+    Returns a short human-readable coverage string, e.g. "53/53 rules
+    configured" or "47/53 rules configured (degraded)", which the caller
+    persists to scans.scanner_coverage. A Full scan should either report
+    full coverage or clearly say it didn't — this used to catch every
+    exception and quietly fall back to ZAP's default policy with only a
+    warning-level log line the user would never see (Priority 7/8 in the
+    handover).
     """
     try:
         zap.pscan.enable_all_scanners()
         zap.ascan.enable_all_scanners()
 
-        scanners = zap.ascan.scanners()
-        applied = 0
-        for scanner in scanners:
-            scanner_id = scanner.get("id")
-            if scanner_id is None:
-                continue
-            zap.ascan.set_scanner_attack_strength(scanner_id, "INSANE")
-            zap.ascan.set_scanner_alert_threshold(scanner_id, "LOW")
-            applied += 1
+        applied, total = _apply_attack_strength(zap, attack_strength, alert_threshold)
 
-        logger.info(
-            "Maximized scan thoroughness: all scanners enabled, attack "
-            "strength INSANE and alert threshold LOW applied to %d/%d rules",
-            applied,
-            len(scanners),
-        )
-    except Exception as exc:  # noqa: BLE001 — if this fails, the scan can
-        # still proceed with ZAP's default policy rather than aborting
-        # entirely over a settings call.
+        coverage = f"{applied}/{total} rules configured"
+        if applied < total:
+            coverage += " (degraded)"
+            logger.warning(
+                "Scanner configuration degraded: %s (attack_strength=%s, "
+                "alert_threshold=%s)",
+                coverage, attack_strength, alert_threshold,
+            )
+        else:
+            logger.info(
+                "Maximized scan thoroughness: all scanners enabled, attack "
+                "strength %s and alert threshold %s applied to %s",
+                attack_strength, alert_threshold, coverage,
+            )
+        return coverage
+    except Exception as exc:  # noqa: BLE001 — the scan can still proceed
+        # with ZAP's default policy rather than aborting entirely over a
+        # settings call, but this is now reported, not swallowed.
         logger.warning("Could not fully maximize scan thoroughness: %s", exc)
+        return "configuration failed — ZAP default policy in use (degraded)"
 
 
-def _run_active_scan(zap, target_url, on_progress=None):
-    logger.info("Active Scan starting (unlimited duration)")
-
+def _active_scan_telemetry(zap, active_scan_id) -> tuple[int | None, int | None]:
+    """Best-effort (pct, request_count) for one active scan id."""
+    pct = None
     try:
-        # These two are the crux of "active scan doesn't do much" — without
-        # them, ZAP applies its own (possibly short, possibly GUI-leftover)
-        # per-scan and per-rule duration caps regardless of anything set
-        # here in Python.
+        pct = int(zap.ascan.status(active_scan_id))
+    except Exception as exc:  # noqa: BLE001 — telemetry is best-effort;
+        # never worth breaking the poll loop over.
+        logger.debug("Could not read active scan status for %s: %s", active_scan_id, exc)
+
+    req_count = None
+    try:
+        for scan in zap.ascan.scans() or []:
+            if str(scan.get("id")) == str(active_scan_id):
+                raw = scan.get("reqCount") or scan.get("requestCount")
+                if raw is not None:
+                    req_count = int(raw)
+                break
+    except Exception as exc:  # noqa: BLE001 — same as above, best-effort.
+        logger.debug("Could not read active scan request count for %s: %s", active_scan_id, exc)
+
+    return pct, req_count
+
+
+def _run_active_scan(
+    zap,
+    target_url,
+    attack_strength: str,
+    alert_threshold: str,
+    on_progress=None,
+    cancel_fn=None,
+) -> str:
+    """
+    Runs the active scan with stall detection + one automatic recovery
+    step (Priority 2): if BOTH the percentage AND the request count stay
+    completely unchanged for _STALL_WINDOW_SECS, and we're running at
+    INSANE, the scan is stopped and restarted once at HIGH strength. This
+    is deliberately NOT triggered by percentage alone (ZAP legitimately
+    reports 0% for long stretches while genuinely sending thousands of
+    requests) and is a fallback recovery path, not normal behavior — it
+    only ever fires once per scan.
+
+    Returns one of: 'completed', 'timed_out', 'cancelled'.
+    """
+    current_strength = attack_strength
+
+    def _start():
         zap.ascan.set_option_max_scan_duration_in_mins(0)
         zap.ascan.set_option_max_rule_duration_in_mins(0)
-        active_scan_id = zap.ascan.scan(target_url)
+        return zap.ascan.scan(target_url)
+
+    logger.info("Active Scan starting (unlimited duration, strength=%s)", current_strength)
+
+    try:
+        active_scan_id = _start()
     except Exception as exc:
         logger.exception("Failed to start active scan")
         raise ZapScanError(f"Failed to start active scan: {exc}") from exc
 
-    finished = _poll_until(
-        lambda: int(zap.ascan.status(active_scan_id)) >= 100,
+    downgraded_already = False
+    last_pct, last_req = _active_scan_telemetry(zap, active_scan_id)
+    last_change_ts = time.time()
+
+    def condition_fn():
+        pct, _ = _active_scan_telemetry(zap, active_scan_id)
+        return pct is not None and pct >= 100
+
+    def pct_fn():
+        pct, _ = _active_scan_telemetry(zap, active_scan_id)
+        return pct if pct is not None else 0
+
+    def progress_fn():
+        pct, req = _active_scan_telemetry(zap, active_scan_id)
+        return f"{pct if pct is not None else '?'}% ({req if req is not None else '?'} requests)"
+
+    def stall_and_cancel_check():
+        nonlocal last_pct, last_req, last_change_ts, downgraded_already, active_scan_id, current_strength
+
+        if cancel_fn and cancel_fn():
+            return True  # let _poll_until's own cancel_fn handle the actual cancel
+
+        pct, req = _active_scan_telemetry(zap, active_scan_id)
+        changed = (pct != last_pct) or (req is not None and req != last_req)
+        if changed:
+            last_pct, last_req = pct, req
+            last_change_ts = time.time()
+            return False
+
+        stalled_for = time.time() - last_change_ts
+        if (
+            not downgraded_already
+            and current_strength == "INSANE"
+            and stalled_for >= _STALL_WINDOW_SECS
+        ):
+            logger.warning(
+                "Active scan appears stalled (pct=%s, requests=%s unchanged "
+                "for %.0fs) — recovering by restarting at HIGH strength "
+                "instead of INSANE.",
+                pct, req, stalled_for,
+            )
+            try:
+                zap.ascan.stop(active_scan_id)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("Failed to stop stalled active scan %s: %s", active_scan_id, exc)
+
+            current_strength = "HIGH"
+            _apply_attack_strength(zap, current_strength, alert_threshold)
+            try:
+                active_scan_id = _start()
+                downgraded_already = True
+                last_pct, last_req = None, None
+                last_change_ts = time.time()
+                logger.info("Active scan restarted at HIGH strength as id=%s", active_scan_id)
+            except Exception as exc:  # noqa: BLE001 — if the restart itself
+                # fails, fall through to the normal safety ceiling instead
+                # of crashing the whole DAST scan over a recovery attempt.
+                logger.warning("Failed to restart active scan after stall: %s", exc)
+        return False
+
+    # This wraps the generic poll loop with our own stall-check tick,
+    # since _poll_until's cadence is throttled for logging but the stall
+    # check needs its own state tracked every interval regardless.
+    def cancel_fn_wrapper():
+        stall_and_cancel_check()
+        return bool(cancel_fn and cancel_fn())
+
+    outcome = _poll_until(
+        condition_fn,
         phase="active scan",
         interval_secs=3,
-        progress_fn=lambda: f"{zap.ascan.status(active_scan_id)}%",
-        pct_fn=lambda: int(zap.ascan.status(active_scan_id)),
+        progress_fn=progress_fn,
+        pct_fn=pct_fn,
         on_progress=on_progress,
+        cancel_fn=cancel_fn_wrapper,
     )
 
-    if not finished:
+    if outcome != OUTCOME_COMPLETED:
         try:
             zap.ascan.stop(active_scan_id)
         except Exception as exc:  # noqa: BLE001 — best-effort cleanup;
             # any failure to stop is non-fatal, but shouldn't be silent.
             logger.debug("Failed to stop active scan %s: %s", active_scan_id, exc)
 
-    return finished
+    if outcome == OUTCOME_CANCELLED:
+        raise ZapScanCancelled("Cancelled during active scan phase")
+
+    return outcome
 
 
 def _load_profile(scan_mode):
@@ -338,8 +522,20 @@ def run_zap_scan(
     target_url: str,
     scan_mode: str = "standard",
     on_progress=None,
-) -> list[dict]:
-
+    cancel_fn=None,
+) -> dict:
+    """
+    Returns a dict:
+        {
+            "alerts": list[dict],
+            "outcome": "completed" | "timed_out",   # (cancelled raises instead)
+            "ajax_spider_status": "completed" | "timed_out" | "failed_to_start" | None,
+            "scanner_coverage": str | None,
+        }
+    Raises ZapScanCancelled if `cancel_fn` reports a cancellation request
+    at any point — routes/dast.py is expected to catch this and mark the
+    scan CANCELLED rather than FAILED.
+    """
     if not target_url or not target_url.strip():
         raise ZapScanError("target_url must not be empty.")
 
@@ -347,19 +543,15 @@ def run_zap_scan(
 
     enable_active_scan = profile["enable_active_scan"]
     enable_ajax_spider = profile["enable_ajax_spider"]
+    attack_strength = profile.get("attack_strength")
+    alert_threshold = profile.get("alert_threshold")
 
     logger.info("Starting %s DAST scan", profile["name"])
 
-    logger.info("STEP 1")
     ZAPv2 = _import_zap_client()
-
-    logger.info("STEP 2")
     config = get_zap_config()
-
-    logger.info("STEP 3")
     ensure_zap_reachable(config)
 
-    logger.info("STEP 4")
     logger.info("Connected to ZAP at %s:%s", config["host"], config["port"])
 
     zap = ZAPv2(
@@ -367,20 +559,12 @@ def run_zap_scan(
         proxies=config["proxies"],
     )
 
-    logger.info("STEP 5")
-
     # ZAP runs as a long-lived daemon (autostart only launches it once; it
     # keeps running across every scan you trigger afterwards). Without an
     # explicit new session here, every scan's spider/active-scan results and
     # the site tree accumulate forever in the SAME ZAP session — so scan #2
-    # inherits everything ZAP already learned in scan #1, the spider finds
-    # "nothing new" and finishes in seconds, the active scan has almost
-    # nothing queued, and zap.core.alerts(baseurl=...) below only returns the
-    # slice of that shared, cross-contaminated session matching the exact
-    # target_url string. Clearing findings in the SecureFlow dashboard does
-    # NOT touch this — that only clears our own DB, not ZAP's internal state.
-    # Starting a fresh, named session per scan makes every run independent
-    # and reproducible, the way scan_id-scoped results should be.
+    # inherits everything ZAP already learned in scan #1. Starting a fresh,
+    # named session per scan makes every run independent and reproducible.
     try:
         session_name = f"secureflow-scan-{int(time.time())}"
         zap.core.new_session(name=session_name, overwrite=True)
@@ -396,9 +580,7 @@ def run_zap_scan(
         )
 
     try:
-        logger.info("STEP 6")
         zap.urlopen(target_url)
-        logger.info("STEP 7")
         time.sleep(2)
     except Exception as exc:
         logger.exception("Unable to reach target '%s'", target_url)
@@ -407,46 +589,75 @@ def run_zap_scan(
             f"Underlying error: {exc}"
         ) from exc
 
-    _maximize_scan_thoroughness(zap)
+    scanner_coverage = None
+    if enable_active_scan:
+        scanner_coverage = _maximize_scan_thoroughness(zap, attack_strength, alert_threshold)
+    else:
+        try:
+            zap.pscan.enable_all_scanners()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Could not enable passive scanners: %s", exc)
 
-    with _prevent_windows_sleep():
-        logger.info("STEP 8")
-        _run_spider(zap, target_url, on_progress=on_progress)
+    ajax_spider_status = None
+    overall_outcome = OUTCOME_COMPLETED
 
-        logger.info("STEP 9")
-        _wait_for_passive_scan(zap, on_progress=on_progress)
+    try:
+        with _prevent_windows_sleep():
+            outcome = _run_spider(zap, target_url, on_progress=on_progress, cancel_fn=cancel_fn)
+            if outcome == OUTCOME_TIMED_OUT:
+                overall_outcome = OUTCOME_TIMED_OUT
 
-        logger.info("STEP 10")
+            _wait_for_passive_scan(zap, on_progress=on_progress, cancel_fn=cancel_fn)
 
-        if enable_ajax_spider:
-            logger.info("AJAX Spider enabled for this profile")
-            _run_ajax_spider(zap, target_url, on_progress=on_progress)
-            _wait_for_passive_scan(zap, on_progress=on_progress)
+            if enable_ajax_spider:
+                logger.info("AJAX Spider enabled for this profile")
+                ajax_spider_status = _run_ajax_spider(
+                    zap, target_url, on_progress=on_progress, cancel_fn=cancel_fn
+                )
+                if ajax_spider_status == "failed_to_start":
+                    logger.warning(
+                        "AJAX Spider failed to start — Full scan will "
+                        "continue without it (graceful degradation, "
+                        "recorded on the scan row)."
+                    )
+                elif ajax_spider_status == OUTCOME_TIMED_OUT:
+                    overall_outcome = OUTCOME_TIMED_OUT
+                _wait_for_passive_scan(zap, on_progress=on_progress, cancel_fn=cancel_fn)
 
-        if enable_active_scan:
-            logger.info("Active Scan enabled for this profile")
-            _run_active_scan(zap, target_url, on_progress=on_progress)
-            _wait_for_passive_scan(zap, on_progress=on_progress)
-        else:
-            logger.info(
-                "Skipping Active Scan because it is disabled for '%s' profile",
-                scan_mode,
-            )
+            if enable_active_scan:
+                logger.info("Active Scan enabled for this profile")
+                outcome = _run_active_scan(
+                    zap, target_url, attack_strength, alert_threshold,
+                    on_progress=on_progress, cancel_fn=cancel_fn,
+                )
+                if outcome == OUTCOME_TIMED_OUT:
+                    overall_outcome = OUTCOME_TIMED_OUT
+                _wait_for_passive_scan(zap, on_progress=on_progress, cancel_fn=cancel_fn)
+            else:
+                logger.info(
+                    "Skipping Active Scan because it is disabled for '%s' profile",
+                    scan_mode,
+                )
+    except ZapScanCancelled:
+        # Best-effort: stop anything ZAP might still have running before
+        # propagating the cancellation up to routes/dast.py.
+        for stopper in (zap.spider.stop, zap.ajaxSpider.stop, zap.ascan.stop):
+            try:
+                stopper()
+            except Exception as exc:  # noqa: BLE001 — best-effort cleanup
+                # on the way out; a failure to stop one phase shouldn't
+                # stop us from trying the others or from propagating the
+                # cancellation itself.
+                logger.debug("Best-effort stop failed during cancellation cleanup: %s", exc)
+        raise
 
     logger.info("Collecting alerts from ZAP")
 
     try:
-        # No baseurl filter here anymore. This used to be
-        # zap.core.alerts(baseurl=target_url) — an exact string match
-        # against whatever URL you typed in. Since every scan now starts
-        # from a fresh, isolated session (see the new_session() call
-        # above), there's nothing left in this session that isn't from
-        # *this* scan, so filtering by the literal input string only
-        # causes harm: a target that redirects http->https (or bare
-        # domain -> www, or vice versa — exactly what happened scanning
-        # testphp.vulnweb.com) records real findings under a host/scheme
-        # variant that doesn't textually match target_url, and they'd be
-        # silently dropped right here even though ZAP found them.
+        # No baseurl filter here. Every scan starts from a fresh, isolated
+        # session, so there's nothing left in this session that isn't from
+        # *this* scan — filtering by the literal input string only causes
+        # harm when a target redirects (http->https, bare domain -> www).
         alerts = zap.core.alerts()
     except Exception as exc:
         logger.exception("Failed to retrieve alerts from ZAP")
@@ -454,50 +665,25 @@ def run_zap_scan(
 
     logger.info("Retrieved %d alerts", len(alerts))
 
-    try:
-        hosts = zap.core.hosts
-        logger.info("Hosts discovered: %s", ", ".join(hosts) if hosts else "None")
-    except Exception as exc:  # noqa: BLE001 — purely informational logging.
-        logger.debug("Unable to retrieve hosts from ZAP: %s", exc)
-
-    try:
-        sites = zap.core.sites
-        logger.info("Sites in session: %s", ", ".join(sites) if sites else "None")
-    except Exception as exc:  # noqa: BLE001 — purely informational logging.
-        logger.debug("Unable to retrieve sites from ZAP: %s", exc)
-
     severity_summary = {"High": 0, "Medium": 0, "Low": 0, "Informational": 0, "Unknown": 0}
-    confidence_summary = {"High": 0, "Medium": 0, "Low": 0, "User Confirmed": 0, "Unknown": 0}
-
     for alert in alerts:
         risk = (alert.get("risk") or alert.get("riskdesc", "")).split(" ")[0]
-        confidence = alert.get("confidence") or "Unknown"
-
-        if risk in severity_summary:
-            severity_summary[risk] += 1
-        else:
-            severity_summary["Unknown"] += 1
-
-        if confidence in confidence_summary:
-            confidence_summary[confidence] += 1
-        else:
-            confidence_summary["Unknown"] += 1
+        severity_summary[risk if risk in severity_summary else "Unknown"] += 1
 
     logger.info("---------- Scan Summary ----------")
     logger.info("Target           : %s", target_url)
     logger.info("Profile          : %s", profile["name"])
-    logger.info("Spider           : Completed")
-    logger.info("AJAX Spider      : %s", "Enabled" if enable_ajax_spider else "Skipped")
-    logger.info("Active Scan      : %s", "Enabled" if enable_active_scan else "Skipped")
+    logger.info("Outcome          : %s", overall_outcome)
+    logger.info("AJAX Spider      : %s", ajax_spider_status or ("Enabled" if enable_ajax_spider else "Skipped"))
+    logger.info("Scanner coverage : %s", scanner_coverage or "n/a")
     logger.info("Total Alerts     : %d", len(alerts))
-    logger.info("High             : %d", severity_summary["High"])
-    logger.info("Medium           : %d", severity_summary["Medium"])
-    logger.info("Low              : %d", severity_summary["Low"])
-    logger.info("Informational    : %d", severity_summary["Informational"])
-    logger.info("Unknown          : %d", severity_summary["Unknown"])
-    logger.info("Confidence Summary")
-    for level, count in confidence_summary.items():
-        logger.info("%-16s : %d", level, count)
+    for level in ("High", "Medium", "Low", "Informational", "Unknown"):
+        logger.info("%-16s : %d", level, severity_summary[level])
     logger.info("----------------------------------")
 
-    return alerts
+    return {
+        "alerts": alerts,
+        "outcome": overall_outcome,
+        "ajax_spider_status": ajax_spider_status,
+        "scanner_coverage": scanner_coverage,
+    }

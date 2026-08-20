@@ -38,7 +38,11 @@ logger = logging.getLogger(__name__)
 DATABASE_URL = os.environ.get("DATABASE_URL")
 
 VALID_SCAN_TYPES = {"sast", "sca", "iac", "secrets", "container", "dast"}
-VALID_SCAN_STATUS = {"running", "completed", "failed"}
+# DAST scans use the full lifecycle (queued/cancelled/timed_out included);
+# the other scan types still only ever use running/completed/failed. The
+# `scans.status` CHECK constraint in Supabase was widened to match — see
+# migration `dast_scan_states_and_telemetry_fields`.
+VALID_SCAN_STATUS = {"queued", "running", "completed", "failed", "cancelled", "timed_out"}
 
 # --- Connection pool + retry ------------------------------------------------
 #
@@ -169,13 +173,15 @@ def get_db():
 
 def init_db():
     """Verifies the DB is reachable, then sweeps any scan left in
-    'running' status from a previous process — that status can only mean
-    "the backend that started this scan died or restarted before it
-    finished" (a clean finish always transitions to 'completed'/'failed'
-    itself). Without this, a scan orphaned by a server restart mid-run
-    (uvicorn --reload picking up a file change, a manual Ctrl+C, a crash)
-    sits on 'running' forever, and the frontend polls it forever without
-    ever getting a terminal status."""
+    'running' or 'queued' status from a previous process — those statuses
+    can only mean "the backend that started/queued this scan died or
+    restarted before it finished" (a clean finish always transitions to a
+    terminal status itself). 'queued' is included because DAST scans can
+    now sit queued behind the ZAP lock (Priority 8) and would otherwise be
+    orphaned the same way a mid-run scan would. Without this sweep, an
+    orphaned scan (uvicorn --reload picking up a file change, a manual
+    Ctrl+C, a crash) sits non-terminal forever, and the frontend polls it
+    forever without ever getting a terminal status."""
     if not DATABASE_URL:
         return
     with get_db() as conn:
@@ -187,7 +193,7 @@ def init_db():
                 SET status = 'failed',
                     finished_at = now(),
                     error_message = 'Backend restarted while this scan was in progress.'
-                WHERE status = 'running'
+                WHERE status IN ('running', 'queued')
                 RETURNING id
                 """
             )
@@ -335,17 +341,73 @@ def delete_project(user_id: str, project_id: int) -> bool:
 
 # ── Scans ───────────────────────────────────────────────────────────
 
-def create_scan(user_id: str, project_id: int, scan_type: str) -> int:
+def create_scan(user_id: str, project_id: int, scan_type: str, initial_status: str = "running") -> int:
     if scan_type not in VALID_SCAN_TYPES:
         raise ValueError(f"Invalid scan_type: {scan_type}")
+    if initial_status not in VALID_SCAN_STATUS:
+        raise ValueError(f"Invalid status: {initial_status}")
 
     with get_db() as conn, conn.cursor() as cur:
         cur.execute(
             "INSERT INTO scans (user_id, project_id, scan_type, status, started_at) "
-            "VALUES (%s, %s, %s, 'running', %s) RETURNING id",
-            (user_id, project_id, scan_type, _now()),
+            "VALUES (%s, %s, %s, %s, %s) RETURNING id",
+            (user_id, project_id, scan_type, initial_status, _now()),
         )
         return cur.fetchone()["id"]
+
+
+def mark_scan_running(user_id: str, scan_id: int) -> None:
+    """Transitions a 'queued' scan to 'running' once it actually acquires
+    the ZAP lock and starts doing work (Priority 8 — DAST queue/busy)."""
+    with get_db() as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE scans SET status = 'running' WHERE id = %s AND user_id = %s",
+            (scan_id, user_id),
+        )
+
+
+def request_scan_cancel(user_id: str, scan_id: int) -> bool:
+    """Sets the cooperative cancellation flag on a running/queued scan.
+    Returns False if no such scan exists for this user, or it's already
+    in a terminal state (nothing to cancel)."""
+    with get_db() as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE scans SET cancel_requested = true "
+            "WHERE id = %s AND user_id = %s AND status IN ('queued', 'running')",
+            (scan_id, user_id),
+        )
+        return cur.rowcount > 0
+
+
+def is_cancel_requested(user_id: str, scan_id: int) -> bool:
+    with get_db() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT cancel_requested FROM scans WHERE id = %s AND user_id = %s",
+            (scan_id, user_id),
+        )
+        row = cur.fetchone()
+        return bool(row and row["cancel_requested"])
+
+
+def update_scan_telemetry(
+    user_id: str,
+    scan_id: int,
+    ajax_spider_status: str | None = None,
+    scanner_coverage: str | None = None,
+) -> None:
+    """Persists the non-silent-failure telemetry added for Priority 6/7:
+    whether the AJAX spider actually ran, and how much of the active-scan
+    rule set was successfully configured for this run."""
+    if ajax_spider_status is None and scanner_coverage is None:
+        return
+    with get_db() as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE scans SET "
+            "ajax_spider_status = COALESCE(%s, ajax_spider_status), "
+            "scanner_coverage = COALESCE(%s, scanner_coverage) "
+            "WHERE id = %s AND user_id = %s",
+            (ajax_spider_status, scanner_coverage, scan_id, user_id),
+        )
 
 
 def finish_scan(user_id: str, scan_id: int, status: str, error_message: str | None = None):
