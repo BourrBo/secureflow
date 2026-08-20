@@ -52,7 +52,12 @@ def _get_live_active_scan() -> dict | None:
             proxies=config["proxies"],
         )
 
-        scans = zap.ascan.scans() or []
+        # zap.ascan.scans is a @property in python-owasp-zap-v2.4, NOT a
+        # method — calling it as zap.ascan.scans() raises TypeError and
+        # was being silently swallowed by the except below, which is what
+        # made "Requests processed" show "—" for all of scan #76. See the
+        # postmortem in zap_runner.py's _active_scan_telemetry docstring.
+        scans = zap.ascan.scans or []
         running = [
             scan for scan in scans
             if str(scan.get("state", "")).upper() == "RUNNING"

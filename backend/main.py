@@ -10,13 +10,8 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from integrations import store as integrations_store
-
-# The integrations/access-control service (GitHub/GitLab OAuth, container
-# registries, org roles, org-scoped API keys) is deliberately its own
-# isolated FastAPI app with its own tables — see integrations/README.md.
-# It's mounted here so one deployment/one port serves both, without the
-# legacy routes above importing or depending on it in any way.
 from integrations.app import app as integrations_app
+from integrations.organization_delete import register_organization_delete
 from routes.api_keys import router as api_keys_router
 from routes.compliance import router as compliance_router
 from routes.container import router as container_router
@@ -40,30 +35,18 @@ logger = logging.getLogger("secureflow")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # ── Startup ──────────────────────────────────────────────────────
     init_db()
     try:
         integrations_store.initialize()
     except Exception:
-        # Doesn't block the legacy backend from starting — only matters if
-        # INTEGRATIONS_DATABASE_URL/INTEGRATIONS_ENCRYPTION_KEY aren't set
-        # yet in this environment (e.g. local dev without those secrets).
-        logger.warning("Integrations service tables were not initialized (see integrations/README.md for required env vars).", exc_info=True)
+        logger.warning(
+            "Integrations service tables were not initialized (see integrations/README.md for required env vars).",
+            exc_info=True,
+        )
     logger.info("SecureFlow backend startup complete.")
 
     yield
 
-    # ── Shutdown ─────────────────────────────────────────────────────
-    # Runs on a clean Ctrl+C, or on SIGTERM — which is what Docker sends
-    # on `docker compose down`/`docker stop` and what Railway sends before
-    # replacing a deployment. Without this, in-flight DB connections were
-    # just abandoned when the process died rather than closed cleanly.
-    # This does NOT try to wait for in-flight scans to finish — a scan
-    # that's mid-run when the container is asked to stop is expected to
-    # end up marked "failed" by init_db()'s orphan sweep on the *next*
-    # startup, same as a crash. Making shutdown actually wait for scans
-    # to finish is a bigger behavior change than "clean up on the way out"
-    # and isn't part of this pass.
     logger.info("SecureFlow backend shutting down...")
     close_pool()
 
@@ -74,14 +57,6 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-
-# ─────────────────────────────────────────────────────────────────────
-# Request logging
-# ─────────────────────────────────────────────────────────────────────
-# Deliberately minimal — method, path, status, duration. No bodies, no
-# headers, no query params (some of those can carry tokens/keys) — this
-# is "what happened and roughly how long it took" for a production log
-# stream, not a debug trace.
 
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
@@ -97,10 +72,6 @@ async def log_requests(request: Request, call_next):
     )
     return response
 
-
-# ─────────────────────────────────────────────────────────────────────
-# CORS
-# ─────────────────────────────────────────────────────────────────────
 
 app.add_middleware(
     CORSMiddleware,
@@ -120,42 +91,30 @@ app.add_middleware(
 )
 
 
-# ─────────────────────────────────────────────────────────────────────
-# Routes
-# ─────────────────────────────────────────────────────────────────────
-
 app.include_router(sast_router)
 app.include_router(sca_router)
 app.include_router(secrets_router)
 app.include_router(reports_router)
 app.include_router(container_router)
 app.include_router(dast_router)
-
 app.include_router(findings_router)
 app.include_router(projects_router)
 app.include_router(compliance_router)
 app.include_router(api_keys_router)
 app.include_router(gate_router)
 
-# Mounted, not included: it's a fully separate ASGI app (own OpenAPI docs at
-# /integrations/docs), so its routes never collide with or fall under the
-# legacy routers' prefixes above.
+# The integrations service is mounted under /integrations. Register the
+# organization-delete endpoint on the same sub-app so Lovable's
+# DELETE /integrations/organizations/{id} call is backed by the API.
+register_organization_delete(integrations_app)
 app.mount("/integrations", integrations_app)
 
 
 @app.get("/")
 def home():
-    return {
-        "message": "SecureFlow Backend Running"
-    }
+    return {"message": "SecureFlow Backend Running"}
 
 
 @app.get("/health")
 def health():
-    """Liveness/readiness probe for Docker Compose, Railway, and any
-    reverse proxy in front of this service. Deliberately does NOT touch
-    the database or any scanner — a slow/unreachable Postgres shouldn't
-    make the container report unhealthy and get killed mid-scan. This is
-    "is the process up and serving requests", not "is everything downstream
-    healthy" — that's a separate, deeper check if it's ever needed."""
     return {"status": "ok"}

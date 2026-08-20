@@ -1,6 +1,7 @@
 import contextlib
 import ctypes
 import logging
+import os
 import platform
 import time
 
@@ -52,12 +53,18 @@ def _prevent_windows_sleep():
 _SAFETY_CEILING_SECS = 4 * 60 * 60  # 4 hours
 
 # Active-scan stall recovery (Priority 2). A scan is only considered
-# stalled if BOTH the reported percentage AND the request count are
-# unchanged for this long — percentage alone is not trustworthy (ZAP can
-# sit at 0% for a long time while genuinely sending thousands of
-# requests). This is a recovery mechanism for a wedged rule, not the
-# normal path, so the window is deliberately generous.
-_STALL_WINDOW_SECS = 5 * 60  # 5 minutes
+# stalled if progress, request count, AND alert count are ALL unchanged
+# for this long — percentage alone is not trustworthy (ZAP can sit at 0%
+# for a long time while genuinely sending thousands of requests). This is
+# a recovery mechanism for a wedged rule, not the normal path, so the
+# window is deliberately generous, and configurable rather than
+# hard-coded — see backend handover notes, item 5.
+_STALL_WINDOW_SECS = int(os.environ.get("DAST_ACTIVE_SCAN_STALL_TIMEOUT_SECONDS", 5 * 60))
+
+# Cadence for the "is the active scan actually doing anything" telemetry
+# log line — item 8 in the handover notes. Independent of _poll_until's
+# own (throttled, generic) logging cadence.
+_ACTIVE_SCAN_TELEMETRY_LOG_SECS = 5
 
 # Terminal/([intermediate]) phase outcomes returned by _poll_until().
 OUTCOME_COMPLETED = "completed"
@@ -355,8 +362,19 @@ def _maximize_scan_thoroughness(zap, attack_strength: str, alert_threshold: str)
         return "configuration failed — ZAP default policy in use (degraded)"
 
 
-def _active_scan_telemetry(zap, active_scan_id) -> tuple[int | None, int | None]:
-    """Best-effort (pct, request_count) for one active scan id."""
+def _active_scan_telemetry(zap, active_scan_id) -> tuple[int | None, int | None, int | None, str | None]:
+    """Best-effort (pct, request_count, alert_count, state) for one active
+    scan id.
+
+    IMPORTANT: `zap.ascan.scans` is a @property in python-owasp-zap-v2.4,
+    NOT a method — `zap.ascan.scans()` raises TypeError('list' object is
+    not callable), which the broad except below used to swallow silently.
+    That bug is what caused scan #76's "Requests processed: —" and, far
+    more seriously, made the stall detector below blind to request count
+    entirely — see the postmortem in the DAST hardening notes for how that
+    produced a false-positive restart and ~7,900 duplicate finding rows.
+    Property access (no parens) is correct and is what's used here.
+    """
     pct = None
     try:
         pct = int(zap.ascan.status(active_scan_id))
@@ -365,17 +383,23 @@ def _active_scan_telemetry(zap, active_scan_id) -> tuple[int | None, int | None]
         logger.debug("Could not read active scan status for %s: %s", active_scan_id, exc)
 
     req_count = None
+    alert_count = None
+    state = None
     try:
-        for scan in zap.ascan.scans() or []:
+        for scan in zap.ascan.scans or []:  # property, not a method call
             if str(scan.get("id")) == str(active_scan_id):
                 raw = scan.get("reqCount") or scan.get("requestCount")
                 if raw is not None:
                     req_count = int(raw)
+                raw_alerts = scan.get("alertCount")
+                if raw_alerts is not None:
+                    alert_count = int(raw_alerts)
+                state = scan.get("state")
                 break
     except Exception as exc:  # noqa: BLE001 — same as above, best-effort.
-        logger.debug("Could not read active scan request count for %s: %s", active_scan_id, exc)
+        logger.debug("Could not read active scan request/alert count for %s: %s", active_scan_id, exc)
 
-    return pct, req_count
+    return pct, req_count, alert_count, state
 
 
 def _run_active_scan(
@@ -388,17 +412,26 @@ def _run_active_scan(
 ) -> str:
     """
     Runs the active scan with stall detection + one automatic recovery
-    step (Priority 2): if BOTH the percentage AND the request count stay
-    completely unchanged for _STALL_WINDOW_SECS, and we're running at
-    INSANE, the scan is stopped and restarted once at HIGH strength. This
-    is deliberately NOT triggered by percentage alone (ZAP legitimately
-    reports 0% for long stretches while genuinely sending thousands of
-    requests) and is a fallback recovery path, not normal behavior — it
-    only ever fires once per scan.
+    step (Priority 2): only if percentage, request count, AND alert count
+    are ALL unchanged for _STALL_WINDOW_SECS (default 5 minutes,
+    configurable via DAST_ACTIVE_SCAN_STALL_TIMEOUT_SECONDS), and we're
+    running at INSANE, the scan is stopped and restarted once at HIGH
+    strength. This is deliberately NOT triggered by percentage alone (ZAP
+    legitimately reports 0% for long stretches while genuinely sending
+    thousands of requests) and is a fallback recovery path, not normal
+    behavior — it only ever fires once per scan.
+
+    Also logs real ZAP telemetry (id/state/progress/requests/alerts/
+    elapsed/strength) roughly every 5 seconds regardless of the stall
+    state, so a scan's actual behavior is auditable from the logs alone —
+    this is what would have caught scan #76's false-positive restart
+    immediately instead of only being diagnosable after the fact from the
+    findings table.
 
     Returns one of: 'completed', 'timed_out', 'cancelled'.
     """
     current_strength = attack_strength
+    start_ts = time.time()
 
     def _start():
         zap.ascan.set_option_max_scan_duration_in_mins(0)
@@ -414,45 +447,75 @@ def _run_active_scan(
         raise ZapScanError(f"Failed to start active scan: {exc}") from exc
 
     downgraded_already = False
-    last_pct, last_req = _active_scan_telemetry(zap, active_scan_id)
+    last_pct, last_req, last_alerts, _ = _active_scan_telemetry(zap, active_scan_id)
     last_change_ts = time.time()
+    last_telemetry_log_ts = 0.0
 
     def condition_fn():
-        pct, _ = _active_scan_telemetry(zap, active_scan_id)
+        pct, _, _, _ = _active_scan_telemetry(zap, active_scan_id)
         return pct is not None and pct >= 100
 
     def pct_fn():
-        pct, _ = _active_scan_telemetry(zap, active_scan_id)
+        pct, _, _, _ = _active_scan_telemetry(zap, active_scan_id)
         return pct if pct is not None else 0
 
     def progress_fn():
-        pct, req = _active_scan_telemetry(zap, active_scan_id)
-        return f"{pct if pct is not None else '?'}% ({req if req is not None else '?'} requests)"
+        pct, req, alerts, state = _active_scan_telemetry(zap, active_scan_id)
+        return (
+            f"{pct if pct is not None else '?'}% "
+            f"({req if req is not None else '?'} requests, "
+            f"{alerts if alerts is not None else '?'} alerts, state={state or '?'})"
+        )
 
     def stall_and_cancel_check():
-        nonlocal last_pct, last_req, last_change_ts, downgraded_already, active_scan_id, current_strength
+        nonlocal last_pct, last_req, last_alerts, last_change_ts, last_telemetry_log_ts
+        nonlocal downgraded_already, active_scan_id, current_strength
 
         if cancel_fn and cancel_fn():
             return True  # let _poll_until's own cancel_fn handle the actual cancel
 
-        pct, req = _active_scan_telemetry(zap, active_scan_id)
-        changed = (pct != last_pct) or (req is not None and req != last_req)
+        pct, req, alerts, state = _active_scan_telemetry(zap, active_scan_id)
+
+        now = time.time()
+        if now - last_telemetry_log_ts >= _ACTIVE_SCAN_TELEMETRY_LOG_SECS:
+            logger.info(
+                "[DAST][ACTIVE] id=%s state=%s progress=%s requests=%s alerts=%s elapsed=%.0fs strength=%s",
+                active_scan_id, state or "?", pct if pct is not None else "?",
+                req if req is not None else "?", alerts if alerts is not None else "?",
+                now - start_ts, current_strength,
+            )
+            last_telemetry_log_ts = now
+
+        # Stalled requires progress AND requests AND alerts to ALL be
+        # unchanged — any one of them moving is real work happening, even
+        # if ZAP's own percentage sits at 0% the whole time (this is the
+        # exact distinction scan #76 got wrong: request count was always
+        # None due to the zap.ascan.scans property/method bug, so a
+        # legitimately-slow-to-report-percentage scan looked stalled and
+        # got restarted from scratch).
+        changed = (
+            (pct != last_pct)
+            or (req is not None and req != last_req)
+            or (alerts is not None and alerts != last_alerts)
+        )
         if changed:
-            last_pct, last_req = pct, req
-            last_change_ts = time.time()
+            last_pct, last_req, last_alerts = pct, req, alerts
+            last_change_ts = now
             return False
 
-        stalled_for = time.time() - last_change_ts
+        stalled_for = now - last_change_ts
         if (
             not downgraded_already
             and current_strength == "INSANE"
+            and state == "RUNNING"
             and stalled_for >= _STALL_WINDOW_SECS
         ):
             logger.warning(
-                "Active scan appears stalled (pct=%s, requests=%s unchanged "
-                "for %.0fs) — recovering by restarting at HIGH strength "
-                "instead of INSANE.",
-                pct, req, stalled_for,
+                "Active scan appears genuinely stalled (pct=%s, requests=%s, "
+                "alerts=%s all unchanged for %.0fs, state=%s) — recovering "
+                "by restarting at HIGH strength instead of INSANE. This "
+                "fires at most once per scan.",
+                pct, req, alerts, stalled_for, state,
             )
             try:
                 zap.ascan.stop(active_scan_id)
@@ -464,7 +527,7 @@ def _run_active_scan(
             try:
                 active_scan_id = _start()
                 downgraded_already = True
-                last_pct, last_req = None, None
+                last_pct, last_req, last_alerts = None, None, None
                 last_change_ts = time.time()
                 logger.info("Active scan restarted at HIGH strength as id=%s", active_scan_id)
             except Exception as exc:  # noqa: BLE001 — if the restart itself
