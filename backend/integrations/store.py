@@ -77,12 +77,6 @@ def role_for(organization_id: int, user_id: str) -> str | None:
 
 
 def list_organizations_for_user(user_id: str) -> list[dict]:
-    """Every organization this user belongs to, with their role in each.
-
-    Backs the "Switch organization" picker — without this, the frontend
-    has no way to show a user their own orgs and can only reset to a
-    blank create-or-enter-ID screen.
-    """
     with db() as conn, conn.cursor() as cur:
         cur.execute(
             """SELECT o.id, o.name, m.role
@@ -122,15 +116,6 @@ def revoke_integration(organization_id: int, integration_id: int) -> bool:
 
 
 def get_active_integration(organization_id: int, integration_id: int, provider: str | tuple[str, ...] | None) -> dict | None:
-    """Return one active integration, including its encrypted secret.
-
-    ``provider`` may be a single provider name, a tuple of acceptable
-    providers, or ``None`` to accept any provider.
-
-    This is intentionally private to server-side provider adapters. Route
-    responses must use ``list_integrations`` instead so secrets never leave
-    the service.
-    """
     provider_filter = ""
     params: tuple = (integration_id, organization_id)
     if provider is not None:
@@ -172,12 +157,6 @@ def put_oauth_state(state_hash: str, organization_id: int, user_id: str) -> None
 
 
 def consume_oauth_state(state_hash: str) -> dict | None:
-    """Consume a state exactly once, rejecting expired callbacks.
-
-    Shared across every OAuth-based provider (GitHub, GitLab, ...) — the
-    state token itself is opaque and random, so there's no need for a
-    separate table per provider.
-    """
     with db() as conn, conn.cursor() as cur:
         cur.execute(
             """DELETE FROM sf_oauth_states

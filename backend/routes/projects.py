@@ -1,11 +1,4 @@
-"""
-routes/projects.py
-
-Phase 2 — CRUD/read view over the `projects` table. Projects themselves
-are created implicitly by the scan routes (get_or_create_project); this
-router only reads and optionally deletes them. Every route requires a
-signed-in user and only ever sees/touches that user's own projects.
-"""
+"""CRUD/read view over the projects table."""
 
 from fastapi import APIRouter, Depends, HTTPException
 
