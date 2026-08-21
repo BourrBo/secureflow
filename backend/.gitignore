@@ -1,26 +1,77 @@
+# ================================
 # Python
+# ================================
 __pycache__/
-*.pyc
+*.py[cod]
 *.pyo
+*.pyd
+
 .venv/
 venv/
+env/
 
-# Env / secrets
+# ================================
+# Environment / secrets
+# ================================
 .env
 .env.*
 !.env.example
+!.env.docker.example
 
-# Database
+# ================================
+# Databases / local runtime state
+# ================================
 *.db
 *.sqlite
 *.sqlite3
 
-# Scan artifacts / scratch
+# Local SecureFlow data directory
+data/
+
+# ================================
+# Scan artifacts / temporary files
+# ================================
 tmp_scans/
 test_repo.zip
 *.zip
+*.7z
+*.rar
 
-# Editors / OS
+# Generated reports / exports
+reports/
+*.pdf
+
+# ================================
+# ZAP runtime data
+# ================================
+# ZAP should be installed/configured locally, not committed with
+# sessions, logs, databases, or generated runtime files.
+ZAP/
+zap.log
+*.session.log
+
+# ================================
+# Frontend / Node
+# ================================
+node_modules/
+.next/
+out/
+dist/
+build/
+coverage/
+.vite/
+
+# ================================
+# Editors / IDE
+# ================================
 .vscode/
 .idea/
+*.swp
+*.swo
+
+# ================================
+# OS
+# ================================
 .DS_Store
+Thumbs.db
+desktop.ini
