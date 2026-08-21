@@ -106,6 +106,7 @@ def _run_dast_scan_background(
     scan_id: int,
     target_url: str,
     scan_mode: str,
+    attack_strength: str,
 ) -> None:
     """Run ZAP on a worker thread so the POST request returns immediately."""
 
@@ -156,14 +157,16 @@ def _run_dast_scan_background(
 
             mark_scan_running(user_id, scan_id)
             logger.info(
-                "Starting %s DAST scan #%s against %s",
+                "Starting %s DAST scan #%s against %s (attack_strength=%s)",
                 scan_mode.upper(),
                 scan_id,
                 target_url,
+                attack_strength,
             )
             result = run_zap_scan(
                 target_url=target_url,
                 scan_mode=scan_mode,
+                attack_strength=attack_strength,
                 on_progress=on_progress,
                 cancel_fn=cancel_fn,
             )
@@ -237,17 +240,25 @@ def scan_dast(request: DastScanRequest, user_id: str = Depends(get_current_user_
 
     thread = threading.Thread(
         target=_run_dast_scan_background,
-        args=(user_id, project_id, scan_id, target_url, request.scan_mode),
+        args=(
+            user_id,
+            project_id,
+            scan_id,
+            target_url,
+            request.scan_mode,
+            request.attack_strength,
+        ),
         daemon=True,
     )
     thread.start()
 
     logger.info(
-        "%s %s DAST scan #%s against %s (running in background)",
+        "%s %s DAST scan #%s against %s (attack_strength=%s, running in background)",
         "Queued" if scanner_busy else "Started",
         request.scan_mode.upper(),
         scan_id,
         target_url,
+        request.attack_strength,
     )
 
     return {
@@ -256,6 +267,7 @@ def scan_dast(request: DastScanRequest, user_id: str = Depends(get_current_user_
         "scanner_busy": scanner_busy,
         "target_url": target_url,
         "scan_mode": request.scan_mode,
+        "attack_strength": request.attack_strength,
     }
 
 

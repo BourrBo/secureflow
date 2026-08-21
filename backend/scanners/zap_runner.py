@@ -66,6 +66,13 @@ _STALL_WINDOW_SECS = int(os.environ.get("DAST_ACTIVE_SCAN_STALL_TIMEOUT_SECONDS"
 # own (throttled, generic) logging cadence.
 _ACTIVE_SCAN_TELEMETRY_LOG_SECS = 5
 
+# Valid ZAP attack-strength values. Pydantic (models/dast_request.py)
+# already restricts the API request to these, but run_zap_scan() is also
+# callable directly (tests, scripts), so it re-validates defensively here
+# rather than trusting an arbitrary string all the way down into ZAP.
+_VALID_ATTACK_STRENGTHS = {"LOW", "MEDIUM", "HIGH", "INSANE"}
+_DEFAULT_ATTACK_STRENGTH = "MEDIUM"
+
 # Terminal/([intermediate]) phase outcomes returned by _poll_until().
 OUTCOME_COMPLETED = "completed"
 OUTCOME_TIMED_OUT = "timed_out"
@@ -584,6 +591,7 @@ def _load_profile(scan_mode):
 def run_zap_scan(
     target_url: str,
     scan_mode: str = "standard",
+    attack_strength: str | None = None,
     on_progress=None,
     cancel_fn=None,
 ) -> dict:
@@ -598,6 +606,13 @@ def run_zap_scan(
     Raises ZapScanCancelled if `cancel_fn` reports a cancellation request
     at any point — routes/dast.py is expected to catch this and mark the
     scan CANCELLED rather than FAILED.
+
+    `attack_strength` is honored exactly as given — it is NEVER silently
+    overridden by the scan_mode/profile. This used to be a profile-derived
+    value (Full scan meant INSANE, always, with no way to pick anything
+    else from the UI), which is what caused DAST scans to run for hours at
+    the most aggressive setting with no explicit choice ever having been
+    made. If omitted or invalid, it defaults to MEDIUM — never INSANE.
     """
     if not target_url or not target_url.strip():
         raise ZapScanError("target_url must not be empty.")
@@ -606,10 +621,29 @@ def run_zap_scan(
 
     enable_active_scan = profile["enable_active_scan"]
     enable_ajax_spider = profile["enable_ajax_spider"]
-    attack_strength = profile.get("attack_strength")
-    alert_threshold = profile.get("alert_threshold")
+    alert_threshold = profile.get("alert_threshold") or "MEDIUM"
 
-    logger.info("Starting %s DAST scan", profile["name"])
+    normalized_strength = (attack_strength or "").strip().upper()
+    if normalized_strength not in _VALID_ATTACK_STRENGTHS:
+        if attack_strength:
+            logger.warning(
+                "Ignoring invalid attack_strength '%s' — defaulting to %s.",
+                attack_strength, _DEFAULT_ATTACK_STRENGTH,
+            )
+        attack_strength = _DEFAULT_ATTACK_STRENGTH
+    else:
+        attack_strength = normalized_strength
+
+    if attack_strength == "INSANE":
+        logger.warning(
+            "DAST scan requested at INSANE attack strength — this can send "
+            "tens of thousands of requests and run for hours. Proceeding "
+            "because it was explicitly selected."
+        )
+
+    logger.info(
+        "Starting %s DAST scan (attack_strength=%s)", profile["name"], attack_strength
+    )
 
     ZAPv2 = _import_zap_client()
     config = get_zap_config()

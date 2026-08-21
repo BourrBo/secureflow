@@ -5,18 +5,20 @@
 # as a hard cutoff, so any real site that took longer than that got its
 # scan cut off mid-way and returned as "complete" with partial results.
 #
-# What varies by profile is scope (AJAX spider, active scan) AND, as of
-# this revision, aggressiveness (attack_strength / alert_threshold).
-# Previously every profile that ran an active scan got the exact same
-# INSANE + LOW settings applied in _maximize_scan_thoroughness() — the
-# profile only controlled whether the active scanner ran at all, not how
-# aggressively. That made "Standard" and "Full" behave almost identically
-# in practice (same payload volume, same noise, same runtime) except for
-# AJAX crawling, which defeats the point of having three profiles.
+# NOTE (attack-strength decoupling): profiles here control SCOPE ONLY —
+# which phases run (AJAX spider, active scan). They used to also bake in
+# an `attack_strength` (Full silently meant INSANE, with no UI control and
+# no way to pick anything else), which caused scans launched from the
+# frontend to always run at INSANE and take hours while looking "stuck" at
+# ~24% the whole time. Attack strength is now an explicit, independent
+# field on the request itself (see models/dast_request.py,
+# DastScanRequest.attack_strength) that the frontend surfaces as its own
+# selector — it is NEVER derived from scan_mode/profile, and defaults to
+# MEDIUM, never INSANE, if the caller omits it. `alert_threshold` (how
+# sensitive ZAP is when deciding something IS an alert) is unrelated to
+# attack strength and stays profile-driven below.
 #
-# attack_strength / alert_threshold accept ZAP's own values:
-#   attack_strength : LOW | MEDIUM | HIGH | INSANE
-#   alert_threshold : OFF | LOW | MEDIUM | HIGH
+# alert_threshold accepts ZAP's own values: OFF | LOW | MEDIUM | HIGH
 SCAN_PROFILES: dict[str, dict] = {
     "quick": {
         "name": "Quick Scan",
@@ -26,7 +28,6 @@ SCAN_PROFILES: dict[str, dict] = {
         ),
         "enable_active_scan": False,
         "enable_ajax_spider": False,
-        "attack_strength": None,
         "alert_threshold": None,
     },
 
@@ -34,25 +35,24 @@ SCAN_PROFILES: dict[str, dict] = {
         "name": "Standard Scan",
         "description": (
             "Recommended profile for most applications. Performs spider, "
-            "passive analysis and active scanning at HIGH strength — "
-            "thorough without the runtime/noise cost of INSANE."
+            "passive analysis and active scanning at the caller-selected "
+            "attack strength (defaults to MEDIUM)."
         ),
         "enable_active_scan": True,
         "enable_ajax_spider": False,
-        "attack_strength": "HIGH",
         "alert_threshold": "MEDIUM",
     },
 
     "full": {
         "name": "Full Scan",
         "description": (
-            "Maximum coverage profile. Performs traditional spider, "
-            "AJAX spider, passive analysis and active scanning at INSANE "
-            "strength with the LOW (most sensitive) alert threshold."
+            "Maximum coverage profile. Performs traditional spider, AJAX "
+            "spider, passive analysis and active scanning at the "
+            "caller-selected attack strength (defaults to MEDIUM) with the "
+            "LOW (most sensitive) alert threshold."
         ),
         "enable_active_scan": True,
         "enable_ajax_spider": True,
-        "attack_strength": "INSANE",
         "alert_threshold": "LOW",
     },
 }
