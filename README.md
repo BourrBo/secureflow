@@ -589,6 +589,163 @@ Authoritative sources are:
 
 Do not overwrite current code with an old archive simply because it contains a familiar feature.
 
+# Repository structure
+
+The main repository should be kept focused on **source code, reproducible configuration, documentation, tests, and CI/CD**.
+
+A clean high-level structure is:
+
+```text
+secureflow/
+├── backend/
+│   ├── config/
+│   ├── integrations/
+│   ├── mappings/
+│   ├── models/
+│   ├── parsers/
+│   ├── routes/
+│   ├── scanners/
+│   ├── secret_detection/
+│   ├── services/
+│   ├── scripts/
+│   ├── tests/
+│   ├── main.py
+│   ├── requirements.txt
+│   ├── Dockerfile
+│   └── .env.example
+├── secureflow/
+│   └── ... Lovable-managed frontend when kept in this repository ...
+├── Tools/
+│   └── ... local security tooling only when it is intentionally versioned ...
+├── .github/
+│   └── workflows/
+├── docker-compose.yml
+├── .gitignore
+├── README.md
+└── <small project documentation / architecture files>
+```
+
+The exact tree can evolve, but the repository should avoid storing generated scan output, local databases, local virtual environments, downloaded dependency caches, credentials, or large binary archives.
+
+## What should be visible on GitHub
+
+### Keep
+
+**Source code**
+- `backend/`
+- current frontend source if the frontend is intentionally mirrored into this repository
+- scanner runners, parsers, integrations, models, routes and services
+
+**Project configuration**
+- `requirements.txt`
+- `package.json`
+- lockfiles
+- `Dockerfile`
+- `docker-compose.yml`
+- `.dockerignore`
+- `.gitignore`
+- `.env.example` / `.env.docker.example`
+- CI/CD workflow files
+
+**Documentation**
+- `README.md`
+- architecture/setup/security documentation that is still accurate
+- useful migration notes and test documentation
+
+**Tests**
+- backend tests
+- any reproducible frontend test configuration
+
+**Security/product assets that are intentionally part of the app**
+- mappings such as ISO/IEC 27001 control data
+- small static assets required by the application
+- scripts that are genuinely required for migrations or maintenance
+
+### Do not keep
+
+**Secrets**
+- `.env`
+- real database URLs/passwords
+- OAuth client secrets
+- encryption keys
+- API keys
+
+**Local runtime state**
+- `venv/`
+- `__pycache__/`
+- local logs
+- local ZAP sessions
+- `.pytest_cache/`
+- `.ruff_cache/`
+
+**Generated scan/workspace data**
+- `tmp_scans/`
+- downloaded Git repositories
+- extracted ZIP contents
+- generated reports that are not intentional sample artifacts
+- user-uploaded scan files
+- `secureflow.db`
+- `*.db`, `*.sqlite`, `*.sqlite3`
+
+**Large archives / backups**
+- teammate ZIP/7z/RAR snapshots
+- old repository backups
+- `node_modules/`
+- tool caches
+- downloaded binaries that can be installed reproducibly
+
+The rule is simple:
+
+> **GitHub should contain what another developer needs to reproduce and understand SecureFlow, not the machine's current runtime state.**
+
+## About `Backend.txt`
+
+The current `Backend.txt` is stale and should be removed from the repository after the information is migrated.
+
+It still documents the old architecture:
+- `SECUREFLOW_DB` / `secureflow.db`
+- JWT environment setup from the older auth design
+- the old SQLite severity backfill
+- an older dependency description
+
+The current backend instead uses Supabase/PostgreSQL, and the current `requirements.txt` reflects the modern dependency set including `psycopg2-binary`, ZAP, EPSS, dotenv, cryptography and boto3. The old document therefore risks sending a new contributor toward a setup path that no longer matches the application.
+
+The important setup information should live in this README and, where necessary, a maintained `backend/README.md` or focused documentation file.
+
+## About the `data/` directory
+
+Do **not** remove `data/` blindly.
+
+First classify its contents:
+
+```text
+data/
+├── static application data
+├── ISO/compliance reference data
+├── test fixtures
+├── generated scan data
+└── obsolete development artifacts
+```
+
+If it contains source-of-truth application data such as compliance mappings or test fixtures, keep the required files and document them.
+
+If it contains generated scan output, local database files, downloaded repositories, temporary data, or old snapshots, remove those from Git and add the appropriate patterns to `.gitignore`.
+
+The README should describe the kept data files by purpose rather than keeping an opaque `data/` directory just because it exists.
+
+## Current repository hygiene
+
+Before any cleanup commit, verify:
+
+```powershell
+git status
+git ls-files | Select-String '\.env$|secureflow\.db|Backend\.txt|node_modules|venv|tmp_scans'
+```
+
+Then inspect the actual `data/` contents locally before deciding which files are source-of-truth.
+
+Never delete a repository directory based only on its name.
+
 # Current open work
 
 The main remaining engineering items include:
