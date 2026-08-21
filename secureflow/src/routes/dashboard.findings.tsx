@@ -1,9 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { clearOrganizationState } from "@/lib/organization";
+import { useScanResults } from "@/lib/scanResults";
 import { PageHeader, Panel, StatCard } from "@/components/dashboard/primitives";
 import { FindingsTable } from "@/components/dashboard/FindingsTable";
+import { FindingDetailDialog } from "@/components/dashboard/FindingDetailDialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -22,8 +25,10 @@ import { api } from "@/lib/api";
 import {
   countBySeverity,
   MODULE_LABEL,
+  MODULE_TO_ENGINE,
   normalizeFinding,
   type Finding,
+  type ModuleKey,
   type Severity,
 } from "@/lib/security";
 import { Bug, ShieldAlert, AlertTriangle, Search, Download, Trash2, Loader2 } from "lucide-react";
@@ -33,9 +38,19 @@ const PAGE_SIZE = 25;
 export const Route = createFileRoute("/dashboard/findings")({
   validateSearch: (search: Record<string, unknown>) => ({
     q: typeof search.q === "string" ? search.q : "",
+    // Explicit scope IDs — a project's "View findings" action must never
+    // silently fall back to every project in the workspace.
+    project_id:
+      typeof search.project_id === "string" && search.project_id ? search.project_id : undefined,
+    scan_id: typeof search.scan_id === "string" && search.scan_id ? search.scan_id : undefined,
   }),
   component: Findings,
 });
+
+const MODULE_FILTERS: Array<{ label: string; value: ModuleKey | "all" }> = [
+  { label: "All scanners", value: "all" },
+  ...(Object.keys(MODULE_LABEL) as ModuleKey[]).map((m) => ({ label: MODULE_LABEL[m], value: m })),
+];
 
 const FILTERS: Array<{ label: string; value: Severity | "all" }> = [
   { label: "All", value: "all" },
@@ -46,15 +61,26 @@ const FILTERS: Array<{ label: string; value: Severity | "all" }> = [
 ];
 
 function Findings() {
-  const { q: initialQ } = Route.useSearch();
+  const { q: initialQ, project_id: projectId, scan_id: scanId } = Route.useSearch();
+  const navigate = useNavigate();
   const [severity, setSeverity] = useState<Severity | "all">("all");
+  // Scanner scoping is a server-side filter: the table then renders that
+  // scanner's own column schema instead of a lowest-common-denominator row.
+  const [module, setModule] = useState<ModuleKey | "all">("all");
   const [inputValue, setInputValue] = useState(initialQ ?? "");
   const [q, setQ] = useState(initialQ ?? "");
   const [page, setPage] = useState(0);
   const [clearing, setClearing] = useState(false);
+  const [detail, setDetail] = useState<Finding | null>(null);
   const queryClient = useQueryClient();
+  const { clearAll: clearScanResults } = useScanResults();
   const { data, isLoading, error } = useQuery(
-    findingsPageQuery(PAGE_SIZE, page * PAGE_SIZE, q || undefined),
+    findingsPageQuery(PAGE_SIZE, page * PAGE_SIZE, {
+      q: q || undefined,
+      project_id: projectId,
+      scan_id: scanId,
+      scanner: module === "all" ? undefined : MODULE_TO_ENGINE[module],
+    }),
   );
 
   useEffect(() => {
@@ -64,7 +90,7 @@ function Findings() {
 
   useEffect(() => {
     setPage(0);
-  }, [q, severity]);
+  }, [q, severity, module, projectId, scanId]);
 
   const all = useMemo(() => data?.items ?? [], [data]);
   const total = data?.total ?? all.length;
@@ -91,17 +117,26 @@ function Findings() {
         `${r.projects ?? 0} projects`,
       ];
       toast.success(`Workspace cleared — deleted ${parts.join(", ")}`);
-      for (const key of [
-        "findings",
-        "findings-page",
-        "projects",
-        "project-scans",
-        "reports",
-        "compliance",
-        "gate-runs",
-      ]) {
-        queryClient.invalidateQueries({ queryKey: [key] });
-      }
+      // A true fresh start: every project/scan/finding the cache knew about
+      // is gone on the backend, so drop the whole cache rather than a
+      // hand-maintained key list. The next created records get whatever IDs
+      // the backend assigns — nothing here assumes they restart at 1.
+      queryClient.clear();
+      clearScanResults();
+      // No scoped filters, selected organization or stored scan output may
+      // survive — a refresh has to come back genuinely empty.
+      clearOrganizationState();
+      setInputValue("");
+      setQ("");
+      setModule("all");
+      setSeverity("all");
+      setPage(0);
+      setDetail(null);
+      navigate({
+        to: "/dashboard/findings",
+        search: { q: "", project_id: undefined, scan_id: undefined },
+        replace: true,
+      });
       await queryClient.refetchQueries({ type: "active" });
     } catch (e) {
       toast.error("Could not clear workspace", {
@@ -164,6 +199,9 @@ function Findings() {
     try {
       const r = await api.listFindings({
         q: q || undefined,
+        project_id: projectId,
+        scan_id: scanId,
+        scanner: module === "all" ? undefined : MODULE_TO_ENGINE[module],
         severity:
           severity !== "all"
             ? (severity.toUpperCase() as "CRITICAL" | "HIGH" | "MEDIUM" | "LOW" | "INFO")
@@ -200,8 +238,12 @@ function Findings() {
     <>
       <PageHeader
         eyebrow="Workspace · Findings"
-        title="All findings"
-        description="Every open issue across every module, ranked by severity and recency."
+        title={projectId ? "Project findings" : "All findings"}
+        description={
+          projectId
+            ? "Findings for this project only — the same rows the scan result screens show."
+            : "Every open issue across every module, ranked by severity and recency."
+        }
         actions={
           <div className="flex items-center gap-2">
             <Button variant="outline" size="sm" disabled={exporting} onClick={handleExport}>
@@ -274,6 +316,28 @@ function Findings() {
         />
       </div>
       <Panel className="mt-5">
+        {(projectId || scanId) && (
+          <div className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2 text-[12px]">
+            <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+              Scoped to
+            </span>
+            {projectId && <span className="font-mono">project #{projectId}</span>}
+            {scanId && <span className="font-mono">· scan #{scanId}</span>}
+            <Button
+              variant="ghost"
+              size="sm"
+              className="ml-auto h-7 text-[11px]"
+              onClick={() =>
+                navigate({
+                  to: "/dashboard/findings",
+                  search: { q, project_id: undefined, scan_id: undefined },
+                })
+              }
+            >
+              View all findings
+            </Button>
+          </div>
+        )}
         <div className="mb-4 flex flex-wrap items-center gap-2">
           <div className="relative min-w-[200px] flex-1">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -297,6 +361,21 @@ function Findings() {
               </button>
             )}
           </div>
+          <div className="flex flex-wrap items-center gap-1 rounded-lg border border-border/70 bg-secondary/20 p-1">
+            {MODULE_FILTERS.map((m) => (
+              <button
+                key={m.value}
+                onClick={() => setModule(m.value)}
+                className={`rounded-md px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.12em] transition-colors ${
+                  module === m.value
+                    ? "bg-secondary text-foreground"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
           <div className="flex items-center gap-1 rounded-lg border border-border/70 bg-secondary/20 p-1">
             {FILTERS.map((f) => (
               <button
@@ -317,6 +396,9 @@ function Findings() {
           findings={rows}
           isLoading={isLoading}
           error={error}
+          detailed
+          module={module === "all" ? null : module}
+          onView={setDetail}
           emptyTitle={all.length === 0 ? "No findings yet" : "No matches"}
           emptyDescription={
             all.length === 0
@@ -355,6 +437,7 @@ function Findings() {
           </div>
         )}
       </Panel>
+      <FindingDetailDialog finding={detail} onOpenChange={(open) => !open && setDetail(null)} />
     </>
   );
 }

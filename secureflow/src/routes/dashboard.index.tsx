@@ -82,13 +82,20 @@ function Overview() {
       />
 
       <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4">
-        <StatCard
-          label="Open findings"
-          value={dash ?? all.length}
-          tone="warning"
-          icon={Bug}
-          loading={loading}
-        />
+        <Link
+          to="/dashboard/findings"
+          search={{ q: "", project_id: undefined, scan_id: undefined }}
+          className="rounded-xl transition-transform hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          aria-label="Open findings"
+        >
+          <StatCard
+            label="Open findings"
+            value={dash ?? all.length}
+            tone="warning"
+            icon={Bug}
+            loading={loading}
+          />
+        </Link>
         <StatCard
           label="Critical"
           value={dash ?? counts.critical}
@@ -304,7 +311,10 @@ function Overview() {
         description="Highest-severity issues across your workspace"
         actions={
           <Button asChild variant="ghost" size="sm">
-            <Link to="/dashboard/findings" search={{ q: "" }}>
+            <Link
+              to="/dashboard/findings"
+              search={{ q: "", project_id: undefined, scan_id: undefined }}
+            >
               View all <ArrowRight className="h-3.5 w-3.5" />
             </Link>
           </Button>

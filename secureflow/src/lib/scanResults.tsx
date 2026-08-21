@@ -8,6 +8,9 @@ type ScanResultsContextValue = {
   get: (module: ModuleKey) => StoredResult | null;
   set: (module: ModuleKey, result: ScanResult) => void;
   reset: (module: ModuleKey) => void;
+  /** Drops every module's stored result — used by the workspace reset,
+   * where the underlying scans/findings no longer exist on the backend. */
+  clearAll: () => void;
   entries: Array<{ module: ModuleKey } & StoredResult>;
 };
 
@@ -71,6 +74,11 @@ export function ScanResultsProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const clearAll = useCallback(() => {
+    setData({});
+    persist({});
+  }, []);
+
   const entries = useMemo(
     () =>
       (Object.entries(data) as Array<[ModuleKey, StoredResult]>).map(([module, stored]) => ({
@@ -80,7 +88,10 @@ export function ScanResultsProvider({ children }: { children: ReactNode }) {
     [data],
   );
 
-  const value = useMemo(() => ({ get, set, reset, entries }), [get, set, reset, entries]);
+  const value = useMemo(
+    () => ({ get, set, reset, clearAll, entries }),
+    [get, set, reset, clearAll, entries],
+  );
 
   return <ScanResultsContext.Provider value={value}>{children}</ScanResultsContext.Provider>;
 }

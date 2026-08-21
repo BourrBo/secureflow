@@ -9,24 +9,52 @@ import {
   type ReactNode,
 } from "react";
 import { toast } from "sonner";
-import { api, type ApiFinding } from "./api";
+import { api, type ApiFinding, type DastMode, type DastAttackStrength } from "./api";
 import { useScanResult } from "./scanResults";
 import { useNotifications } from "./notifications";
 
-type DastStatus = "idle" | "running" | "completed" | "failed";
+type DastStatus =
+  | "idle"
+  | "queued"
+  | "running"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "timed_out";
 
 type DastState = {
   scanId: number | null;
   status: DastStatus;
   targetUrl: string | null;
+  scanMode: DastMode | null;
+  attackStrength: DastAttackStrength | null;
   phase: string | null;
   pct: number | null;
   error: string | null;
+  /** Epoch ms when the scan was started client-side, for elapsed time. */
+  startedAt: number | null;
+  scannerBusy: boolean;
+  ajaxSpiderStatus: "completed" | "timed_out" | "failed_to_start" | null;
+  scannerCoverage: string | null;
+  cancelRequested: boolean;
+  partialResults: boolean;
+  /** Live ZAP active-scan telemetry; null when the backend hasn't reported it. */
+  activeScan: {
+    state: string | null;
+    requests: number | null;
+    progress: number | null;
+    alerts: number | null;
+  } | null;
 };
 
 type DastScanContextValue = {
   state: DastState;
-  start: (targetUrl: string) => Promise<void>;
+  start: (
+    targetUrl: string,
+    scanMode?: DastMode,
+    attackStrength?: DastAttackStrength,
+  ) => Promise<void>;
+  cancel: () => Promise<void>;
   reset: () => void;
 };
 
@@ -39,9 +67,18 @@ const IDLE_STATE: DastState = {
   scanId: null,
   status: "idle",
   targetUrl: null,
+  scanMode: null,
+  attackStrength: null,
   phase: null,
   pct: null,
   error: null,
+  startedAt: null,
+  scannerBusy: false,
+  ajaxSpiderStatus: null,
+  scannerCoverage: null,
+  cancelRequested: false,
+  partialResults: false,
+  activeScan: null,
 };
 
 function loadInitial(): DastState {
@@ -50,9 +87,15 @@ function loadInitial(): DastState {
     const raw = window.sessionStorage.getItem(STORAGE_KEY);
     if (!raw) return IDLE_STATE;
     const parsed = JSON.parse(raw) as DastState;
-    // Only "running" is worth reattaching to — a completed/failed scan's
+    // Only in-flight scans are worth reattaching to — a terminal scan's
     // findings already live in scanResults, and idle has nothing to resume.
-    return parsed.status === "running" ? parsed : IDLE_STATE;
+    return parsed.status === "running" || parsed.status === "queued"
+      ? {
+          ...parsed,
+          scanMode: parsed.scanMode ?? null,
+          attackStrength: parsed.attackStrength ?? null,
+        }
+      : IDLE_STATE;
   } catch {
     return IDLE_STATE;
   }
@@ -61,7 +104,7 @@ function loadInitial(): DastState {
 function persist(state: DastState) {
   if (typeof window === "undefined") return;
   try {
-    if (state.status === "running") {
+    if (state.status === "running" || state.status === "queued") {
       window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     } else {
       window.sessionStorage.removeItem(STORAGE_KEY);
@@ -117,38 +160,82 @@ export function DastScanProvider({ children }: { children: ReactNode }) {
       try {
         const res = await api.getDastScanStatus(scanId);
 
-        if (res.status === "completed") {
+        // Meta fields that can arrive in any status.
+        const meta = {
+          ajaxSpiderStatus: res.ajax_spider_status ?? null,
+          scannerCoverage: res.scanner_coverage ?? null,
+          cancelRequested: res.cancel_requested === true,
+        };
+
+        if (res.status === "completed" || res.status === "timed_out") {
+          const timedOut = res.status === "timed_out";
           const findings: ApiFinding[] = res.findings ?? [];
           setResult({ findings, label: stateRef.current.targetUrl ?? `scan #${scanId}` });
-          setState((s) => ({ ...s, status: "completed", phase: "complete", pct: 100 }));
-          toast.success("DAST scan complete", {
-            description: `${findings.length} finding${findings.length === 1 ? "" : "s"} returned.`,
-          });
+          setState((s) => ({
+            ...s,
+            ...meta,
+            status: timedOut ? "timed_out" : "completed",
+            phase: "complete",
+            pct: 100,
+            partialResults: timedOut || res.partial_results === true,
+            error: timedOut ? (res.error ?? "Scan hit its safety timeout.") : null,
+          }));
+          const desc = `${findings.length} finding${findings.length === 1 ? "" : "s"} returned.`;
+          if (timedOut) {
+            toast.warning("DAST scan timed out — partial results", { description: desc });
+          } else {
+            toast.success("DAST scan complete", { description: desc });
+          }
           push({
-            kind: "success",
-            title: "DAST scan complete",
+            kind: timedOut ? "info" : "success",
+            title: timedOut ? "DAST scan timed out (partial results)" : "DAST scan complete",
             description: `${stateRef.current.targetUrl ?? `scan #${scanId}`} — ${findings.length} finding${findings.length === 1 ? "" : "s"}`,
           });
           clearTimer();
           return;
         }
 
+        if (res.status === "cancelled") {
+          const message = res.error || "Scan cancelled.";
+          setState((s) => ({ ...s, ...meta, status: "cancelled", error: message }));
+          toast.info("DAST scan cancelled", { description: message });
+          push({ kind: "info", title: "DAST scan cancelled", description: message });
+          clearTimer();
+          return;
+        }
+
         if (res.status === "failed") {
           const message = res.error || "DAST scan failed.";
-          setState((s) => ({ ...s, status: "failed", error: message }));
+          setState((s) => ({ ...s, ...meta, status: "failed", error: message }));
           toast.error("DAST scan failed", { description: message });
           push({ kind: "error", title: "DAST scan failed", description: message });
           clearTimer();
           return;
         }
 
-        // Still running — real phase/percent from the backend, not a
-        // frontend animation.
+        // Still queued or running — real phase/percent from the backend,
+        // not a frontend animation.
         setState((s) => ({
           ...s,
-          status: "running",
+          ...meta,
+          status: res.status === "queued" ? "queued" : "running",
           phase: res.progress_phase ?? s.phase,
           pct: typeof res.progress_pct === "number" ? res.progress_pct : s.pct,
+          activeScan:
+            res.active_scan_state != null ||
+            typeof res.active_scan_requests === "number" ||
+            typeof res.active_scan_progress === "number" ||
+            typeof res.active_scan_alerts === "number"
+              ? {
+                  state: res.active_scan_state ?? null,
+                  requests:
+                    typeof res.active_scan_requests === "number" ? res.active_scan_requests : null,
+                  progress:
+                    typeof res.active_scan_progress === "number" ? res.active_scan_progress : null,
+                  alerts:
+                    typeof res.active_scan_alerts === "number" ? res.active_scan_alerts : null,
+                }
+              : s.activeScan,
         }));
         pollTimer.current = setTimeout(() => pollOnce(scanId), POLL_INTERVAL_MS);
       } catch {
@@ -166,12 +253,13 @@ export function DastScanProvider({ children }: { children: ReactNode }) {
   // or a full page reload) — and reconnect immediately when the browser
   // regains connectivity, rather than waiting out the current interval.
   useEffect(() => {
-    if (state.status === "running" && state.scanId !== null) {
+    if ((state.status === "running" || state.status === "queued") && state.scanId !== null) {
       pollOnce(state.scanId);
     }
 
     const handleOnline = () => {
-      if (stateRef.current.status === "running" && stateRef.current.scanId !== null) {
+      const st = stateRef.current.status;
+      if ((st === "running" || st === "queued") && stateRef.current.scanId !== null) {
         clearTimer();
         pollOnce(stateRef.current.scanId);
       }
@@ -190,19 +278,31 @@ export function DastScanProvider({ children }: { children: ReactNode }) {
   }, [state]);
 
   const start = useCallback(
-    async (targetUrl: string) => {
+    async (
+      targetUrl: string,
+      scanMode: DastMode = "full",
+      attackStrength: DastAttackStrength = "MEDIUM",
+    ) => {
       clearTimer();
       setState({
-        scanId: null,
+        ...IDLE_STATE,
         status: "running",
         targetUrl,
+        scanMode,
+        attackStrength,
         phase: "starting",
-        pct: null,
-        error: null,
+        startedAt: Date.now(),
       });
       try {
-        const started = await api.scanDast(targetUrl);
-        setState((s) => ({ ...s, scanId: started.scan_id }));
+        const started = await api.scanDast(targetUrl, scanMode, attackStrength);
+        const queued = started.status === "queued" || started.scanner_busy === true;
+        setState((s) => ({
+          ...s,
+          scanId: started.scan_id,
+          status: queued ? "queued" : "running",
+          scannerBusy: started.scanner_busy === true,
+          phase: queued ? "queued" : s.phase,
+        }));
         push({ kind: "info", title: "DAST scan started", description: targetUrl });
         pollOnce(started.scan_id);
       } catch (e) {
@@ -220,7 +320,26 @@ export function DastScanProvider({ children }: { children: ReactNode }) {
     setState(IDLE_STATE);
   }, [clearTimer]);
 
-  const value = useMemo(() => ({ state, start, reset }), [state, start, reset]);
+  const cancel = useCallback(async () => {
+    const scanId = stateRef.current.scanId;
+    if (scanId === null) return;
+    setState((s) => ({ ...s, cancelRequested: true }));
+    try {
+      await api.cancelDastScan(scanId);
+      toast.info("Cancellation requested", {
+        description: "Waiting for the scanner to stop — this is not instant.",
+      });
+      // Cancellation is cooperative: keep polling until status flips.
+      clearTimer();
+      pollOnce(scanId);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Could not cancel scan.";
+      setState((s) => ({ ...s, cancelRequested: false }));
+      toast.error("Could not cancel scan", { description: message });
+    }
+  }, [clearTimer, pollOnce]);
+
+  const value = useMemo(() => ({ state, start, cancel, reset }), [state, start, cancel, reset]);
 
   return <DastScanContext.Provider value={value}>{children}</DastScanContext.Provider>;
 }

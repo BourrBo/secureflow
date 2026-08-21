@@ -43,11 +43,20 @@ export const projectsQuery = () =>
     ...common,
   });
 
-export const findingsPageQuery = (limit: number, offset: number, q?: string) =>
+/**
+ * Findings are always requested with their scope explicit: a project page
+ * asks for `project_id`, a scan drill-down adds `scan_id`. The IDs travel in
+ * the URL/query key, never inferred from a display name.
+ */
+export const findingsPageQuery = (
+  limit: number,
+  offset: number,
+  filters: Pick<FindingsQuery, "q" | "project_id" | "scan_id" | "scanner"> = {},
+) =>
   queryOptions({
-    queryKey: ["findings-page", limit, offset, q],
+    queryKey: ["findings-page", limit, offset, filters],
     queryFn: async () => {
-      const r = await api.listFindings({ limit, offset, q });
+      const r = await api.listFindings({ limit, offset, ...filters });
       const list = Array.isArray(r) ? r : (r?.findings ?? []);
       const total = !Array.isArray(r) && typeof r?.total === "number" ? r.total : list.length;
       return { items: list.map(normalizeFinding), total };

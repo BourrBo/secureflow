@@ -6,7 +6,13 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { SeverityBadge, PriorityBadge } from "./primitives";
-import { priorityTooltip, type Finding } from "@/lib/security";
+import {
+  priorityTooltip,
+  redactedMatch,
+  secretTypeLabel,
+  iacCategory,
+  type Finding,
+} from "@/lib/security";
 import { ExternalLink } from "lucide-react";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
@@ -18,6 +24,54 @@ function Section({ title, children }: { title: string; children: React.ReactNode
       <div className="mt-1.5 text-[13px] leading-relaxed text-foreground">{children}</div>
     </div>
   );
+}
+
+/**
+ * Secondary metadata lives here rather than in extra table columns. Only the
+ * fields that are meaningful for the finding's scanner — and actually
+ * populated — are listed; nothing is invented.
+ */
+function metaFields(f: Finding): Array<{ label: string; value: string }> {
+  const out: Array<{ label: string; value: string }> = [];
+  const add = (label: string, value?: string | number | null) => {
+    if (value !== null && value !== undefined && String(value) !== "") {
+      out.push({ label, value: String(value) });
+    }
+  };
+
+  add("Scanner", f.moduleLabel);
+  add("Project", f.project !== "—" ? f.project : "");
+  add("Scan", f.scanId ? `#${f.scanId}` : "");
+
+  if (f.module === "sca" || f.module === "container") {
+    add("Ecosystem", f.ecosystem);
+    add("Installed version", f.installedVersion);
+    add("Fixed version", f.fixedVersion);
+    add("CVE", f.cve);
+    add("CVSS", f.cvss);
+    add("EPSS", f.epssScore);
+    add("EPSS percentile", f.epssPercentile);
+  } else if (f.module === "secrets") {
+    add("Secret type", secretTypeLabel(f.rule));
+    add("Detection", f.rule === "entropy-generic" ? "Entropy" : "Pattern match");
+    add("Redacted match", redactedMatch(f.description));
+    add("File · line", f.location);
+  } else if (f.module === "iac") {
+    add("Check ID / rule", f.rule);
+    add("Category", f.file ? iacCategory(f.file) : "");
+    add("File · line", f.location);
+  } else if (f.module === "dast") {
+    add("Target", f.file);
+    add("Rule", f.rule);
+  } else {
+    add("Rule", f.rule);
+    add("File · line", f.location);
+  }
+
+  add("CWE", f.cwe);
+  add("OWASP", f.owasp);
+  add("Status", f.status);
+  return out;
 }
 
 export function FindingDetailDialog({
@@ -60,6 +114,19 @@ export function FindingDetailDialog({
             </DialogHeader>
 
             <div className="space-y-5">
+              <div className="grid grid-cols-2 gap-x-4 gap-y-3 rounded-lg border border-border/60 bg-secondary/20 p-3 sm:grid-cols-3">
+                {metaFields(finding).map((m) => (
+                  <div key={m.label}>
+                    <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+                      {m.label}
+                    </div>
+                    <div className="mt-0.5 break-all font-mono text-[12px] text-foreground">
+                      {m.value}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
               {finding.description && <Section title="Description">{finding.description}</Section>}
 
               {finding.recommendation && (
