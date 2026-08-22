@@ -104,8 +104,20 @@ Typical command:
 
 ```powershell
 cd D:\secureflow\backend
+python -m venv venv
 .\venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+-- YOU SHOULD SEE SOMETHING LIKE (venv) PS D:\secureflow\backend>
 uvicorn main:app --reload --port 8000
+
+Also The .env File is not there in this repo due to security issues 
+```
+To Run the Frontend : 
+```
+cd secureflow
+npm i
+npm run dev
+
 ```
 
 ZAP is bundled locally at:
