@@ -6,7 +6,7 @@ from models.container_request import ContainerScanRequest
 from models.finding import Finding
 from parsers.container_parser import normalize_container_findings
 from scanners.container_runner import run_container_scan
-from services.auth_service import get_current_user_id
+from services.auth_service import require_scope
 from services.db_service import (
     create_scan,
     finish_scan,
@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
     "/api/container/scan",
     response_model=list[Finding],
 )
-def scan_container(request: ContainerScanRequest, user_id: str = Depends(get_current_user_id)):
+def scan_container(request: ContainerScanRequest, user_id: str = Depends(require_scope("scans:run"))):
     """
     Scan a container image with Trivy and persist the results, following
     the same project/scan/findings pattern used by the SAST/SCA/IaC routes.

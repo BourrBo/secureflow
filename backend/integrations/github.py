@@ -54,6 +54,38 @@ def exchange_code(code: str) -> dict:
     return payload
 
 
+def refresh_token(refresh_token_value: str) -> dict:
+    """Exchange a refresh_token for a new access_token.
+
+    Only relevant if this OAuth App has "Enable token expiration" turned on
+    (Developer settings → OAuth Apps → this app). When that setting is off,
+    GitHub never returns a refresh_token in the first place and this is
+    never called — access tokens are treated as non-expiring, same as
+    before this function existed.
+    """
+    client_id, client_secret, _ = _oauth_settings()
+    try:
+        response = httpx.post(
+            GITHUB_TOKEN_URL,
+            data={
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "grant_type": "refresh_token",
+                "refresh_token": refresh_token_value,
+            },
+            headers={"Accept": "application/json"},
+            timeout=10,
+        )
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=503, detail="GitHub OAuth service unavailable") from exc
+    if response.status_code != 200:
+        raise HTTPException(status_code=401, detail="GitHub connection is no longer authorized")
+    payload = response.json()
+    if not payload.get("access_token") or payload.get("error"):
+        raise HTTPException(status_code=401, detail="GitHub connection is no longer authorized")
+    return payload
+
+
 def _github_get(path: str, token: str, params: dict | None = None) -> httpx.Response:
     try:
         response = httpx.get(

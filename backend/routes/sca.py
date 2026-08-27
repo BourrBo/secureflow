@@ -6,7 +6,7 @@ from models.finding import Finding
 from models.scan_request import ScanRequest
 from parsers.trivy_parser import normalize_trivy_findings
 from scanners.trivy_runner import run_trivy
-from services.auth_service import get_current_user_id
+from services.auth_service import require_scope
 from services.db_service import (
     create_scan,
     derive_project_name_from_repo_url,
@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 )
 def scan_sca(
     request: ScanRequest,
-    user_id: str = Depends(get_current_user_id),
+    user_id: str = Depends(require_scope("scans:run")),
 ):
     repo_path = None
 
@@ -103,7 +103,7 @@ def scan_sca(
 )
 def scan_sca_local(
     file: UploadFile = File(...),
-    user_id: str = Depends(get_current_user_id),
+    user_id: str = Depends(require_scope("scans:run")),
 ):
     extract_path = None
 

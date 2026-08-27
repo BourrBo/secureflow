@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from services.auth_service import get_current_user_id
+from services.auth_service import require_scope
 from services.db_service import (
     delete_project,
     get_project,
@@ -14,12 +14,12 @@ router = APIRouter(prefix="/api/projects", tags=["projects"])
 
 
 @router.get("")
-def get_projects(user_id: str = Depends(get_current_user_id)):
+def get_projects(user_id: str = Depends(require_scope("projects:read"))):
     return {"projects": list_projects(user_id)}
 
 
 @router.get("/{project_id}")
-def get_single_project(project_id: int, user_id: str = Depends(get_current_user_id)):
+def get_single_project(project_id: int, user_id: str = Depends(require_scope("projects:read"))):
     project = get_project(user_id, project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -27,7 +27,7 @@ def get_single_project(project_id: int, user_id: str = Depends(get_current_user_
 
 
 @router.get("/{project_id}/scans")
-def get_project_scans(project_id: int, user_id: str = Depends(get_current_user_id)):
+def get_project_scans(project_id: int, user_id: str = Depends(require_scope("projects:read"))):
     project = get_project(user_id, project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -35,7 +35,7 @@ def get_project_scans(project_id: int, user_id: str = Depends(get_current_user_i
 
 
 @router.delete("/{project_id}")
-def remove_project(project_id: int, user_id: str = Depends(get_current_user_id)):
+def remove_project(project_id: int, user_id: str = Depends(require_scope("projects:write"))):
     deleted = delete_project(user_id, project_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Project not found")

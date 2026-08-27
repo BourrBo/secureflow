@@ -31,6 +31,7 @@ import psycopg2
 import psycopg2.extras
 import psycopg2.pool
 
+from services.dedup_service import compute_identity
 from utils.severity import normalize_severity
 
 logger = logging.getLogger(__name__)
@@ -43,6 +44,11 @@ VALID_SCAN_TYPES = {"sast", "sca", "iac", "secrets", "container", "dast"}
 # `scans.status` CHECK constraint in Supabase was widened to match — see
 # migration `dast_scan_states_and_telemetry_fields`.
 VALID_SCAN_STATUS = {"queued", "running", "completed", "failed", "cancelled", "timed_out"}
+
+# Finding lifecycle (models/finding.py). Enforced here at the application
+# layer rather than a DB CHECK constraint, so adding a new state later
+# doesn't require another migration.
+VALID_FINDING_STATUS = {"Open", "Triaged", "Fixed", "Accepted"}
 
 # --- Connection pool + retry ------------------------------------------------
 #
@@ -228,6 +234,13 @@ def _row_to_finding_dict(row: dict) -> dict:
     elif raw_ctx is None:
         d["code_context"] = []
     # if it's already a list/dict, psycopg2 decoded jsonb natively — leave it
+
+    # DB column is `reference_links` -- REFERENCES is a reserved SQL
+    # keyword and can't be used unquoted as a column name. The model and
+    # every API consumer use `references`; remap at the boundary so nothing
+    # downstream needs to know about the rename.
+    if "reference_links" in d:
+        d["references"] = d.pop("reference_links") or []
     return d
 
 
@@ -476,57 +489,196 @@ def list_scans(user_id: str, project_id: int | None = None) -> list[dict]:
 
 # ── Findings ────────────────────────────────────────────────────────
 
+def _find_canonical_finding(
+    conn,
+    user_id: str,
+    project_id: int,
+    fingerprint: str,
+    unique_id: str | None,
+) -> dict | None:
+    """Finds an existing CANONICAL finding (duplicate_of IS NULL) with the
+    same identity in this project. Checks unique_id_from_tool first (only
+    set for CVE-bearing scanners -- Trivy/Container -- and more reliable
+    than the fingerprint), then falls back to fingerprint for everything
+    else. Returns {id, status, owner, notes} if found, else None.
+
+    Callers must treat the returned status/owner/notes as read-only -- they
+    belong to the canonical finding and a reviewer's triage action on them
+    must never be silently overwritten by a rescan.
+    """
+    with conn.cursor() as cur:
+        if unique_id:
+            cur.execute(
+                """
+                SELECT id, status, owner, notes FROM findings
+                WHERE user_id = %s AND project_id = %s
+                  AND unique_id_from_tool = %s AND duplicate_of IS NULL
+                LIMIT 1
+                """,
+                (user_id, project_id, unique_id),
+            )
+            row = cur.fetchone()
+            if row:
+                return dict(row)
+
+        cur.execute(
+            """
+            SELECT id, status, owner, notes FROM findings
+            WHERE user_id = %s AND project_id = %s
+              AND fingerprint = %s AND duplicate_of IS NULL
+            LIMIT 1
+            """,
+            (user_id, project_id, fingerprint),
+        )
+        row = cur.fetchone()
+        return dict(row) if row else None
+
+
 def insert_findings(user_id: str, scan_id: int, project_id: int, findings: list) -> None:
     """`findings` is a list of models.finding.Finding instances (or objects
-    with the same attributes/model_dump())."""
+    with the same attributes/model_dump()).
+
+    Cross-engine deduplication (services/dedup_service.py): every finding is
+    identified by a stable fingerprint (scanner-specific fields, always
+    scoped to project_id) and, for CVE-bearing scanners, a stronger
+    unique_id_from_tool. Every detection is still inserted as its own row --
+    a full audit trail of "detected again in scan #47" / "also flagged by
+    the Container scan" -- but if a CANONICAL finding (duplicate_of IS NULL)
+    already exists with the same identity in this project, the new row's
+    duplicate_of points at it instead of the row becoming its own canonical
+    finding. That's what actually lets a reviewer answer "is this a
+    duplicate?" from a finding's detail view.
+
+    Lifecycle fields (status/owner/notes) only ever live on the canonical
+    row and are never set by a scan -- only PATCH /api/findings/{id} sets
+    them (see update_finding below). A duplicate detection inherits the
+    canonical's CURRENT status/owner/notes purely for display consistency;
+    the canonical itself is refreshed with newer severity/CVSS/EPSS/priority
+    values and last_seen_at, but its status/owner/notes are left exactly as
+    a reviewer set them -- a rescan must never silently reopen something
+    marked Fixed or Accepted.
+    """
     if not findings:
         return
 
-    rows = []
-    for f in findings:
-        data = f.model_dump() if hasattr(f, "model_dump") else dict(f)
-        rows.append((
-            user_id,
-            scan_id,
-            project_id,
-            data["title"],
-            normalize_severity(data.get("severity"), scanner=data.get("scanner")),
-            data.get("file"),
-            data.get("line"),
-            data.get("description"),
-            data.get("rule"),
-            data.get("cwe"),
-            data.get("owasp"),
-            data.get("scanner"),
-            data.get("iso27001_control"),
-            data.get("iso27001_control_name"),
-            data.get("iso27001_description"),
-            json.dumps(data.get("code_context") or []),
-            data.get("installed_version"),
-            data.get("fixed_version"),
-            data.get("cvss"),
-            data.get("ecosystem"),
-            data.get("cve"),
-            data.get("epss_score"),
-        ))
+    new_rows = []
+    canonical_refreshes = []
 
-    with get_db() as conn, conn.cursor() as cur:
-        psycopg2.extras.execute_batch(
-            cur,
-            """
-            INSERT INTO findings (
-                user_id, scan_id, project_id, title, severity, file, line,
-                description, rule, cwe, owasp, scanner, iso27001_control,
-                iso27001_control_name, iso27001_description, code_context,
-                installed_version, fixed_version, cvss, ecosystem, cve,
-                epss_score
-            ) VALUES (
-                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                %s, %s, %s, %s, %s, %s, %s
+    with get_db() as conn:
+        for f in findings:
+            data = f.model_dump() if hasattr(f, "model_dump") else dict(f)
+            fingerprint, unique_id = compute_identity(data, project_id)
+            canonical = _find_canonical_finding(conn, user_id, project_id, fingerprint, unique_id)
+            duplicate_of = canonical["id"] if canonical else None
+            severity = normalize_severity(data.get("severity"), scanner=data.get("scanner"))
+
+            new_rows.append((
+                user_id,
+                scan_id,
+                project_id,
+                data["title"],
+                severity,
+                data.get("file"),
+                data.get("line"),
+                data.get("description"),
+                data.get("rule"),
+                data.get("cwe"),
+                data.get("owasp"),
+                data.get("scanner"),
+                data.get("iso27001_control"),
+                data.get("iso27001_control_name"),
+                data.get("iso27001_description"),
+                json.dumps(data.get("code_context") or []),
+                data.get("installed_version"),
+                data.get("fixed_version"),
+                data.get("cvss"),
+                data.get("ecosystem"),
+                data.get("cve"),
+                data.get("cvss_vector"),
+                data.get("epss_score"),
+                data.get("epss_percentile"),
+                data.get("epss_risk_level"),
+                data.get("affected_location"),
+                data.get("affected_path"),
+                data.get("affected_parameter"),
+                data.get("recommendation"),
+                data.get("references") or [],
+                data.get("additional_observations"),
+                data.get("revalidation_status", "Open"),
+                data.get("new_or_repeat", "New"),
+                data.get("priority_score"),
+                data.get("priority_basis"),
+                data.get("priority_risk_level"),
+                fingerprint,
+                unique_id,
+                duplicate_of,
+                # status/owner/notes: a fresh canonical always starts "Open"
+                # with no owner/notes; a duplicate detection inherits the
+                # existing canonical's current values for display only.
+                canonical["status"] if canonical else "Open",
+                canonical["owner"] if canonical else None,
+                canonical["notes"] if canonical else None,
+            ))
+
+            if canonical:
+                canonical_refreshes.append((
+                    severity,
+                    data.get("cvss"),
+                    data.get("cvss_vector"),
+                    data.get("epss_score"),
+                    data.get("epss_percentile"),
+                    data.get("epss_risk_level"),
+                    data.get("priority_score"),
+                    data.get("priority_basis"),
+                    data.get("priority_risk_level"),
+                    user_id,
+                    canonical["id"],
+                ))
+
+        with conn.cursor() as cur:
+            psycopg2.extras.execute_batch(
+                cur,
+                """
+                INSERT INTO findings (
+                    user_id, scan_id, project_id, title, severity, file, line,
+                    description, rule, cwe, owasp, scanner, iso27001_control,
+                    iso27001_control_name, iso27001_description, code_context,
+                    installed_version, fixed_version, cvss, ecosystem, cve,
+                    cvss_vector, epss_score, epss_percentile, epss_risk_level,
+                    affected_location, affected_path, affected_parameter,
+                    recommendation, reference_links, additional_observations,
+                    revalidation_status, new_or_repeat, priority_score,
+                    priority_basis, priority_risk_level, fingerprint,
+                    unique_id_from_tool, duplicate_of, status, owner, notes
+                ) VALUES (
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                )
+                """,
+                new_rows,
             )
-            """,
-            rows,
-        )
+            logger.info(
+                "insert_findings: scan %d -> %d rows (%d new canonical, %d duplicate detections)",
+                scan_id,
+                len(new_rows),
+                len(new_rows) - len(canonical_refreshes),
+                len(canonical_refreshes),
+            )
+
+            if canonical_refreshes:
+                psycopg2.extras.execute_batch(
+                    cur,
+                    """
+                    UPDATE findings
+                    SET severity = %s, cvss = %s, cvss_vector = %s,
+                        epss_score = %s, epss_percentile = %s, epss_risk_level = %s,
+                        priority_score = %s, priority_basis = %s, priority_risk_level = %s,
+                        last_seen_at = now()
+                    WHERE user_id = %s AND id = %s
+                    """,
+                    canonical_refreshes,
+                )
 
 
 def list_findings(
@@ -535,15 +687,23 @@ def list_findings(
     scan_id: int | None = None,
     severity: str | None = None,
     scanner: str | None = None,
+    status: str | None = None,
     q: str | None = None,
     limit: int | None = None,
     offset: int = 0,
+    include_duplicates: bool = False,
 ) -> tuple[list[dict], int]:
     """This user's findings joined back to their scan/project, with optional
     filters and real pagination (limit + offset). Powers GET /api/findings.
     Returns (findings, total_count) -- total_count ignores `limit`/`offset`
     so the caller can show "showing X-Y of TOTAL" and page through the rest
     instead of only ever seeing the first `limit` rows.
+
+    By default only CANONICAL findings are returned (duplicate_of IS NULL),
+    each annotated with `duplicate_count` -- how many other detections
+    (a later rescan, or a different scanner hitting the same fingerprint)
+    point at it. Pass include_duplicates=True to see every row, including
+    duplicates (used by list_duplicate_findings below).
 
     `q` is a free-text search matched server-side against the finding's id,
     title, project name, and scanner/module -- across the WHOLE result set,
@@ -558,6 +718,8 @@ def list_findings(
     """
     params: dict = {"uid": user_id}
 
+    if not include_duplicates:
+        base_query += " AND f.duplicate_of IS NULL"
     if project_id is not None:
         base_query += " AND s.project_id = %(project_id)s"
         params["project_id"] = project_id
@@ -570,6 +732,9 @@ def list_findings(
     if scanner is not None:
         base_query += " AND f.scanner = %(scanner)s"
         params["scanner"] = scanner
+    if status is not None:
+        base_query += " AND f.status = %(status)s"
+        params["status"] = status
     if q:
         base_query += """ AND (
             f.title ILIKE %(q)s
@@ -585,8 +750,10 @@ def list_findings(
         total = cur.fetchone()["total"]
 
         select_query = (
-            f"SELECT f.*, s.scan_type AS scan_type, s.project_id AS project_id, "
-            f"p.name AS project_name {base_query} ORDER BY f.id DESC"
+            "SELECT f.*, s.scan_type AS scan_type, s.project_id AS project_id, "
+            "p.name AS project_name, "
+            "(SELECT COUNT(*) FROM findings d WHERE d.duplicate_of = f.id) AS duplicate_count "
+            f"{base_query} ORDER BY f.id DESC"
         )
         if limit is not None:
             select_query += " LIMIT %(limit)s OFFSET %(offset)s"
@@ -595,6 +762,93 @@ def list_findings(
 
         cur.execute(select_query, params)
         return [_row_to_finding_dict(r) for r in cur.fetchall()], total
+
+
+def get_finding(user_id: str, finding_id: int) -> dict | None:
+    """A single finding (canonical or duplicate), with duplicate_count.
+    Powers the finding detail view and PATCH's response."""
+    with get_db() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT f.*, s.scan_type AS scan_type, s.project_id AS project_id,
+                   p.name AS project_name,
+                   (SELECT COUNT(*) FROM findings d WHERE d.duplicate_of = f.id) AS duplicate_count
+            FROM findings f
+            JOIN scans s ON s.id = f.scan_id
+            JOIN projects p ON p.id = s.project_id
+            WHERE f.id = %s AND f.user_id = %s
+            """,
+            (finding_id, user_id),
+        )
+        row = cur.fetchone()
+        return _row_to_finding_dict(row) if row else None
+
+
+def list_duplicate_findings(user_id: str, finding_id: int) -> list[dict]:
+    """Every other detection of the same underlying finding -- a later
+    rescan, or a different scanner that hit the same fingerprint/unique_id.
+    Powers GET /api/findings/{id}/duplicates ("also detected by...").
+    Returns [] for a finding with no duplicates, or for a duplicate row
+    itself (duplicates don't have their own duplicates)."""
+    with get_db() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT f.*, s.scan_type AS scan_type, s.started_at AS scan_started_at
+            FROM findings f
+            JOIN scans s ON s.id = f.scan_id
+            WHERE f.duplicate_of = %s AND f.user_id = %s
+            ORDER BY f.id DESC
+            """,
+            (finding_id, user_id),
+        )
+        return [_row_to_finding_dict(r) for r in cur.fetchall()]
+
+
+def update_finding(
+    user_id: str,
+    finding_id: int,
+    status: str | None = None,
+    owner: str | None = None,
+    notes: str | None = None,
+) -> dict | None:
+    """Applies a reviewer's triage action -- PATCH /api/findings/{id}.
+    Only fields actually passed (not None) are changed. Raises ValueError
+    if `status` isn't a recognized lifecycle state, or if the target
+    finding is itself a duplicate (duplicate_of IS NOT NULL) -- lifecycle
+    state only ever lives on the canonical finding, so the route should
+    redirect the caller to duplicate_of instead of silently editing a
+    row nobody's dashboard treats as authoritative.
+    Returns the updated finding, or None if it doesn't exist / isn't
+    owned by this user."""
+    if status is not None and status not in VALID_FINDING_STATUS:
+        raise ValueError(f"Invalid status: {status!r}. Must be one of {sorted(VALID_FINDING_STATUS)}.")
+
+    with get_db() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT id, duplicate_of FROM findings WHERE id = %s AND user_id = %s",
+            (finding_id, user_id),
+        )
+        row = cur.fetchone()
+        if not row:
+            return None
+        if row["duplicate_of"] is not None:
+            raise ValueError(
+                f"Finding {finding_id} is a duplicate of finding {row['duplicate_of']}; "
+                "update the canonical finding instead."
+            )
+
+        cur.execute(
+            """
+            UPDATE findings
+            SET status = COALESCE(%s, status),
+                owner  = COALESCE(%s, owner),
+                notes  = COALESCE(%s, notes)
+            WHERE id = %s AND user_id = %s
+            """,
+            (status, owner, notes, finding_id, user_id),
+        )
+
+    return get_finding(user_id, finding_id)
 
 
 def delete_all_findings(user_id: str, project_id: int | None = None, scanner: str | None = None) -> int:
@@ -666,29 +920,58 @@ def get_compliance_frameworks(user_id: str, project_id: int | None = None) -> li
 
     "Compliant" here means: of the Annex A controls scanners can plausibly
     map a finding to (see mappings/iso27001.py — 25 of them, not the full
-    93-control Annex A), how many currently have zero open findings against
-    them. This only covers what static/dependency/secret/IaC/DAST scanning
-    can actually observe — it is not a substitute for a real ISO 27001
-    audit, and should be labeled as such wherever it's displayed.
+    93-control Annex A), how many currently have zero OPEN findings against
+    them. Only canonical findings count (duplicate_of IS NULL) — the same
+    real vulnerability caught by two scanners must not count twice — and a
+    finding marked Fixed or Accepted no longer represents an active gap, so
+    it's excluded here too (it still shows up in get_compliance_summary's
+    evidence view below).
+
+    A project/user with zero completed scans is reported as "not assessed"
+    (score: None) rather than defaulting to a hollow 100% — no scan
+    evidence must never read as "compliant". This only covers what
+    static/dependency/secret/IaC/DAST scanning can actually observe — it is
+    not a substitute for a real ISO 27001 audit, and should be labeled as
+    such wherever it's displayed.
     """
     from mappings.iso27001 import ANNEX_A_CONTROLS
 
     total_controls = len(ANNEX_A_CONTROLS)
 
-    query = """
+    scope_query = "SELECT COUNT(*) AS n FROM scans WHERE user_id = %(uid)s AND status = 'completed'"
+    params: dict = {"uid": user_id}
+    if project_id is not None:
+        scope_query += " AND project_id = %(project_id)s"
+        params["project_id"] = project_id
+
+    triggered_query = """
         SELECT DISTINCT f.iso27001_control
         FROM findings f
         JOIN scans s ON s.id = f.scan_id
         WHERE f.user_id = %(uid)s AND f.iso27001_control IS NOT NULL
+          AND f.duplicate_of IS NULL
+          AND f.status NOT IN ('Fixed', 'Accepted')
     """
-    params: dict = {"uid": user_id}
     if project_id is not None:
-        query += " AND s.project_id = %(project_id)s"
-        params["project_id"] = project_id
+        triggered_query += " AND s.project_id = %(project_id)s"
 
     with get_db() as conn, conn.cursor() as cur:
-        cur.execute(query, params)
+        cur.execute(scope_query, params)
+        completed_scans = cur.fetchone()["n"]
+
+        cur.execute(triggered_query, params)
         triggered = {r["iso27001_control"] for r in cur.fetchall()}
+
+    if completed_scans == 0:
+        return [
+            {
+                "name": "ISO/IEC 27001:2022",
+                "controls_passed": 0,
+                "controls_total": total_controls,
+                "score": None,
+                "assessed": False,
+            }
+        ]
 
     passed = max(0, total_controls - len(triggered))
     score = round(passed / total_controls * 100) if total_controls else 100
@@ -699,29 +982,39 @@ def get_compliance_frameworks(user_id: str, project_id: int | None = None) -> li
             "controls_passed": passed,
             "controls_total": total_controls,
             "score": score,
+            "assessed": True,
         }
     ]
 
 
 def get_compliance_summary(user_id: str, project_id: int | None = None) -> list[dict]:
     """Groups this user's findings by ISO/IEC 27001:2022 Annex A control,
-    with a severity breakdown per control. Powers GET /api/compliance."""
+    with a severity breakdown per control. Powers GET /api/compliance.
+
+    This is the evidence-trail view, so — unlike get_compliance_frameworks'
+    score above — it deliberately does NOT filter out Fixed/Accepted
+    findings: a control that had findings which are now Fixed is exactly
+    the "supporting findings -> evidence" trail the compliance system is
+    supposed to provide. It does still exclude duplicate_of IS NOT NULL
+    rows, so the same real vulnerability flagged by two scanners is counted
+    once, not twice."""
     query = """
         SELECT
             f.iso27001_control      AS control_id,
             f.iso27001_control_name AS control_name,
             f.iso27001_description  AS control_description,
             f.severity,
+            f.status,
             COUNT(*) AS count
         FROM findings f
         JOIN scans s ON s.id = f.scan_id
-        WHERE f.user_id = %(uid)s
+        WHERE f.user_id = %(uid)s AND f.duplicate_of IS NULL
     """
     params: dict = {"uid": user_id}
     if project_id is not None:
         query += " AND s.project_id = %(pid)s"
         params["pid"] = project_id
-    query += " GROUP BY f.iso27001_control, f.iso27001_control_name, f.iso27001_description, f.severity"
+    query += " GROUP BY f.iso27001_control, f.iso27001_control_name, f.iso27001_description, f.severity, f.status"
 
     with get_db() as conn, conn.cursor() as cur:
         cur.execute(query, params)
@@ -736,10 +1029,13 @@ def get_compliance_summary(user_id: str, project_id: int | None = None) -> list[
                 "control_name": r["control_name"],
                 "control_description": r["control_description"],
                 "total_findings": 0,
+                "open_findings": 0,
                 "by_severity": {},
             }
-        controls[cid]["by_severity"][r["severity"]] = r["count"]
+        controls[cid]["by_severity"][r["severity"]] = controls[cid]["by_severity"].get(r["severity"], 0) + r["count"]
         controls[cid]["total_findings"] += r["count"]
+        if r["status"] not in ("Fixed", "Accepted"):
+            controls[cid]["open_findings"] += r["count"]
 
     return sorted(controls.values(), key=lambda c: c["total_findings"], reverse=True)
 

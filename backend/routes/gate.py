@@ -32,7 +32,7 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel
 
-from services.auth_service import get_current_user_id
+from services.auth_service import require_scope
 from services.db_service import list_findings, list_gate_runs, record_gate_run
 from services.sarif_service import findings_to_sarif
 
@@ -68,7 +68,7 @@ class GateEvaluateRequest(BaseModel):
 @router.post("/evaluate")
 def evaluate_gate(
     request: GateEvaluateRequest,
-    user_id: str = Depends(get_current_user_id),
+    user_id: str = Depends(require_scope("scans:run")),
 ):
     fail_on_severities = _parse_fail_on(request.fail_on)
 
@@ -113,7 +113,7 @@ def evaluate_gate(
 def get_gate_runs(
     project_id: int | None = Query(default=None),
     limit: int = Query(default=50, le=200),
-    user_id: str = Depends(get_current_user_id),
+    user_id: str = Depends(require_scope("scans:read")),
 ):
     return {"runs": list_gate_runs(user_id, project_id=project_id, limit=limit)}
 
@@ -122,7 +122,7 @@ def get_gate_runs(
 def get_gate_sarif(
     project_id: int = Query(...),
     scan_id: int | None = Query(default=None),
-    user_id: str = Depends(get_current_user_id),
+    user_id: str = Depends(require_scope("scans:read")),
 ):
     findings, _total = list_findings(user_id, project_id=project_id, scan_id=scan_id, limit=None)
     sarif = findings_to_sarif(findings)

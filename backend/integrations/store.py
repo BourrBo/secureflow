@@ -40,7 +40,7 @@ def initialize() -> None:
             );
             CREATE TABLE IF NOT EXISTS sf_integrations (
               id BIGSERIAL PRIMARY KEY, organization_id BIGINT NOT NULL REFERENCES sf_organizations(id) ON DELETE CASCADE,
-              provider TEXT NOT NULL CHECK (provider IN ('github','gitlab','dockerhub','ecr','ghcr')),
+              provider TEXT NOT NULL CHECK (provider IN ('github','gitlab','bitbucket','dockerhub','ecr','ghcr')),
               name TEXT NOT NULL, encrypted_credentials TEXT NOT NULL,
               metadata JSONB NOT NULL DEFAULT '{}'::jsonb, status TEXT NOT NULL DEFAULT 'connected',
               created_by TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now(), revoked_at TIMESTAMPTZ
@@ -58,6 +58,19 @@ def initialize() -> None:
               expires_at TIMESTAMPTZ NOT NULL,
               created_at TIMESTAMPTZ NOT NULL DEFAULT now()
             );
+        """)
+        # CREATE TABLE IF NOT EXISTS above is a no-op on a table that
+        # already exists — so on any database that had sf_integrations
+        # created before 'bitbucket' was added as a provider, the CHECK
+        # constraint above never actually took effect, and every Bitbucket
+        # connect attempt fails with an unhandled CheckViolation (a 500).
+        # This makes that self-healing: drop-and-recreate the constraint
+        # every startup so it always matches the provider list above,
+        # regardless of how old the table is. Cheap and safe to repeat.
+        cur.execute("""
+            ALTER TABLE sf_integrations DROP CONSTRAINT IF EXISTS sf_integrations_provider_check;
+            ALTER TABLE sf_integrations ADD CONSTRAINT sf_integrations_provider_check
+              CHECK (provider IN ('github','gitlab','bitbucket','dockerhub','ecr','ghcr'));
         """)
 
 
@@ -185,3 +198,23 @@ def revoke_api_key(organization_id: int, key_id: int) -> bool:
     with db() as conn, conn.cursor() as cur:
         cur.execute("UPDATE sf_api_keys SET revoked_at=now() WHERE id=%s AND organization_id=%s AND revoked_at IS NULL", (key_id, organization_id))
         return cur.rowcount == 1
+
+
+def find_api_key_by_hash(key_hash: str) -> dict | None:
+    """Looks up an org-scoped API key by its hash for authentication —
+    the counterpart to services.db_service.get_user_id_for_api_key for the
+    legacy per-user keys. Returns revoked keys too (callers must check
+    `revoked_at` themselves) so a revoked key can be told apart from one
+    that never existed."""
+    with db() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT id,organization_id,scopes,created_by,revoked_at FROM sf_api_keys WHERE key_hash=%s",
+            (key_hash,),
+        )
+        row = cur.fetchone()
+        return dict(row) if row else None
+
+
+def touch_api_key(key_id: int) -> None:
+    with db() as conn, conn.cursor() as cur:
+        cur.execute("UPDATE sf_api_keys SET last_used_at=now() WHERE id=%s", (key_id,))

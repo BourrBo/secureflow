@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel
 
 from models.finding import Finding
-from services.auth_service import get_current_user_id
+from services.auth_service import require_scope
 from services.db_service import get_project, get_scan, list_findings, list_scans
 from services.report_service import generate_pdf_report
 from services.sarif_service import findings_to_sarif
@@ -41,7 +41,7 @@ class ReportRequest(BaseModel):
 
 
 @router.post("/api/reports/pdf")
-def generate_report(request: ReportRequest, user_id: str = Depends(get_current_user_id)):
+def generate_report(request: ReportRequest, user_id: str = Depends(require_scope("reports:read"))):
     try:
         findings_dicts = [f.model_dump() for f in request.findings]
         pdf_bytes = generate_pdf_report(
@@ -73,7 +73,7 @@ def generate_report(request: ReportRequest, user_id: str = Depends(get_current_u
 # ── Phase 2 — list past scans, regenerate a PDF from stored findings ──
 
 @router.get("/api/reports")
-def get_reports(project_id: int | None = None, user_id: str = Depends(get_current_user_id)):
+def get_reports(project_id: int | None = None, user_id: str = Depends(require_scope("reports:read"))):
     """Lists every completed (report-able) scan belonging to the
     signed-in user, instead of only being able to generate a PDF
     on-the-fly right after a scan finishes."""
@@ -82,7 +82,7 @@ def get_reports(project_id: int | None = None, user_id: str = Depends(get_curren
 
 
 @router.get("/api/reports/{scan_id}/pdf")
-def regenerate_report(scan_id: int, user_id: str = Depends(get_current_user_id)):
+def regenerate_report(scan_id: int, user_id: str = Depends(require_scope("reports:read"))):
     """Rebuilds the same ISO 27001-style PDF for a past scan, using the
     findings already stored in the DB — no re-scanning required. Only
     works for scans owned by the signed-in user."""
@@ -114,7 +114,7 @@ def regenerate_report(scan_id: int, user_id: str = Depends(get_current_user_id))
 
 
 @router.get("/api/reports/{scan_id}/sarif")
-def report_sarif(scan_id: int, user_id: str = Depends(get_current_user_id)):
+def report_sarif(scan_id: int, user_id: str = Depends(require_scope("reports:read"))):
     """SARIF 2.1.0 export of a past scan's findings -- the format GitHub
     Code Scanning / GitLab natively render as inline PR annotations."""
     scan = get_scan(user_id, scan_id)
@@ -133,7 +133,7 @@ def report_sarif(scan_id: int, user_id: str = Depends(get_current_user_id)):
 
 
 @router.get("/api/reports/{scan_id}/json")
-def report_json(scan_id: int, user_id: str = Depends(get_current_user_id)):
+def report_json(scan_id: int, user_id: str = Depends(require_scope("reports:read"))):
     """Raw JSON export of a past scan's findings -- for teams that want
     to pipe results into their own tooling instead of PDF/SARIF."""
     scan = get_scan(user_id, scan_id)

@@ -19,7 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 
-from integrations import github, gitlab, registries, store
+from integrations import bitbucket, github, gitlab, registries, store
 from integrations.permissions import require_role_permission
 from integrations.security import (
     current_user_id,
@@ -98,6 +98,10 @@ class GitHubRepositorySelection(BaseModel):
 
 
 class GitLabRepositorySelection(BaseModel):
+    full_name: str = Field(min_length=3, max_length=300)
+
+
+class BitbucketRepositorySelection(BaseModel):
     full_name: str = Field(min_length=3, max_length=300)
 
 
@@ -412,6 +416,87 @@ def scan_gitlab_repository(organization_id: int, integration_id: int, user_id: s
     _assert(organization_id, user_id, "scans:run")
     integration, token = _gitlab_token(organization_id, integration_id)
     return _scan_selected_repository(organization_id, integration, token, "gitlab", user_id)
+
+
+@app.get("/bitbucket/authorize")
+def bitbucket_authorize(organization_id: int = Query(...), user_id: str = Depends(current_user_id)):
+    _assert(organization_id, user_id, "integrations:manage")
+    client_id, redirect_uri = bitbucket.authorize_settings()
+    state = secrets.token_urlsafe(32)
+    store.put_oauth_state(hashlib.sha256(state.encode()).hexdigest(), organization_id, user_id)
+    return {
+        "authorize_url": bitbucket.BITBUCKET_AUTHORIZE_URL
+        + "?"
+        + urlencode({"client_id": client_id, "redirect_uri": redirect_uri, "response_type": "code", "state": state})
+    }
+
+
+@app.get("/bitbucket/callback")
+def bitbucket_callback(code: str = Query(..., min_length=1), state: str = Query(..., min_length=1)):
+    state_record = store.consume_oauth_state(hashlib.sha256(state.encode()).hexdigest())
+    if not state_record:
+        return _oauth_result("bitbucket", None, error="Invalid, expired, or already-used OAuth state")
+    token = bitbucket.exchange_code(code)
+    account = bitbucket.authenticated_user(token["access_token"])
+    credentials = {key: token[key] for key in ("access_token", "refresh_token", "token_type", "scopes") if token.get(key)}
+    integration = store.put_integration(
+        state_record["organization_id"],
+        "bitbucket",
+        account["login"],
+        encrypt_secret(json.dumps(credentials)),
+        {"bitbucket_account": account},
+        state_record["user_id"],
+    )
+    return _oauth_result("bitbucket", integration)
+
+
+def _bitbucket_token(organization_id: int, integration_id: int) -> tuple[dict, str]:
+    integration = store.get_active_integration(organization_id, integration_id, "bitbucket")
+    if not integration:
+        raise HTTPException(status_code=404, detail="Active Bitbucket integration not found")
+    try:
+        credentials = json.loads(decrypt_secret(integration["encrypted_credentials"]))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=500, detail="Stored Bitbucket credentials are invalid") from exc
+    token = credentials.get("access_token")
+    if not token:
+        raise HTTPException(status_code=500, detail="Stored Bitbucket credentials are incomplete")
+    return integration, token
+
+
+@app.get("/organizations/{organization_id}/integrations/{integration_id}/bitbucket/repositories")
+def bitbucket_repositories(
+    organization_id: int,
+    integration_id: int,
+    page: int = Query(default=1, ge=1),
+    per_page: int = Query(default=50, ge=1, le=100),
+    user_id: str = Depends(current_user_id),
+):
+    _assert(organization_id, user_id, "integrations:manage")
+    _, token = _bitbucket_token(organization_id, integration_id)
+    return {"repositories": bitbucket.list_repositories(token, page, per_page), "page": page, "per_page": per_page}
+
+
+@app.put("/organizations/{organization_id}/integrations/{integration_id}/bitbucket/repository")
+def select_bitbucket_repository(
+    organization_id: int,
+    integration_id: int,
+    payload: BitbucketRepositorySelection,
+    user_id: str = Depends(current_user_id),
+):
+    _assert(organization_id, user_id, "integrations:manage")
+    integration, token = _bitbucket_token(organization_id, integration_id)
+    repository = bitbucket.get_repository(token, payload.full_name)
+    metadata = {**integration["metadata"], "selected_repository": repository}
+    updated = store.update_integration_metadata(organization_id, integration_id, metadata)
+    return {"integration": updated, "repository": repository}
+
+
+@app.post("/organizations/{organization_id}/integrations/{integration_id}/bitbucket/scan")
+def scan_bitbucket_repository(organization_id: int, integration_id: int, user_id: str = Depends(current_user_id)):
+    _assert(organization_id, user_id, "scans:run")
+    integration, token = _bitbucket_token(organization_id, integration_id)
+    return _scan_selected_repository(organization_id, integration, token, "bitbucket", user_id)
 
 
 @app.get("/gitlab/authorize")

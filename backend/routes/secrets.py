@@ -19,7 +19,7 @@ from models.finding import Finding
 from models.scan_request import ScanRequest
 from parsers.secrets_parser import normalize_secret_findings
 from secret_detection.scanner import scan_directory_for_secrets
-from services.auth_service import get_current_user_id
+from services.auth_service import require_scope
 from services.db_service import (
     create_scan,
     derive_project_name_from_repo_url,
@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
     "/api/secrets/scan",
     response_model=list[Finding]
 )
-def scan_secrets(request: ScanRequest, user_id: str = Depends(get_current_user_id)):
+def scan_secrets(request: ScanRequest, user_id: str = Depends(require_scope("scans:run"))):
     repo_path = None
 
     project_id = get_or_create_project(
@@ -71,7 +71,7 @@ def scan_secrets(request: ScanRequest, user_id: str = Depends(get_current_user_i
     "/api/secrets/scan-local",
     response_model=list[Finding]
 )
-def scan_secrets_local(file: UploadFile = File(...), user_id: str = Depends(get_current_user_id)):
+def scan_secrets_local(file: UploadFile = File(...), user_id: str = Depends(require_scope("scans:run"))):
     extract_path = None
 
     project_id = get_or_create_project(
