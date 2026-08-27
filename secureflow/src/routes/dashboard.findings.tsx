@@ -21,7 +21,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { findingsPageQuery } from "@/lib/queries";
-import { api } from "@/lib/api";
+import { api, type FindingStatus } from "@/lib/api";
 import {
   countBySeverity,
   MODULE_LABEL,
@@ -52,6 +52,14 @@ const MODULE_FILTERS: Array<{ label: string; value: ModuleKey | "all" }> = [
   ...(Object.keys(MODULE_LABEL) as ModuleKey[]).map((m) => ({ label: MODULE_LABEL[m], value: m })),
 ];
 
+const STATUS_FILTERS: Array<{ label: string; value: FindingStatus | "all" }> = [
+  { label: "All", value: "all" },
+  { label: "Open", value: "Open" },
+  { label: "Triaged", value: "Triaged" },
+  { label: "Fixed", value: "Fixed" },
+  { label: "Accepted", value: "Accepted" },
+];
+
 const FILTERS: Array<{ label: string; value: Severity | "all" }> = [
   { label: "All", value: "all" },
   { label: "Critical", value: "critical" },
@@ -67,6 +75,8 @@ function Findings() {
   // Scanner scoping is a server-side filter: the table then renders that
   // scanner's own column schema instead of a lowest-common-denominator row.
   const [module, setModule] = useState<ModuleKey | "all">("all");
+  // Lifecycle triage state is a real server-side filter, not a client slice.
+  const [status, setStatus] = useState<FindingStatus | "all">("all");
   const [inputValue, setInputValue] = useState(initialQ ?? "");
   const [q, setQ] = useState(initialQ ?? "");
   const [page, setPage] = useState(0);
@@ -80,6 +90,7 @@ function Findings() {
       project_id: projectId,
       scan_id: scanId,
       scanner: module === "all" ? undefined : MODULE_TO_ENGINE[module],
+      status: status === "all" ? undefined : status,
     }),
   );
 
@@ -90,7 +101,7 @@ function Findings() {
 
   useEffect(() => {
     setPage(0);
-  }, [q, severity, module, projectId, scanId]);
+  }, [q, severity, module, status, projectId, scanId]);
 
   const all = useMemo(() => data?.items ?? [], [data]);
   const total = data?.total ?? all.length;
@@ -130,6 +141,7 @@ function Findings() {
       setQ("");
       setModule("all");
       setSeverity("all");
+      setStatus("all");
       setPage(0);
       setDetail(null);
       navigate({
@@ -172,6 +184,9 @@ function Findings() {
       "cve",
       "epss_score",
       "priority_score",
+      "status",
+      "owner",
+      "notes",
       "created_at",
     ];
     const rows = findings.map((f) => [
@@ -188,6 +203,9 @@ function Findings() {
       f.cve,
       f.epssScore,
       f.priorityScore,
+      f.status,
+      f.owner,
+      f.notes,
       f.createdAt ? f.createdAt.toISOString() : "",
     ]);
     return [headers, ...rows].map((row) => row.map(csvEscape).join(",")).join("\n");
@@ -202,6 +220,7 @@ function Findings() {
         project_id: projectId,
         scan_id: scanId,
         scanner: module === "all" ? undefined : MODULE_TO_ENGINE[module],
+        status: status === "all" ? undefined : status,
         severity:
           severity !== "all"
             ? (severity.toUpperCase() as "CRITICAL" | "HIGH" | "MEDIUM" | "LOW" | "INFO")
@@ -373,6 +392,21 @@ function Findings() {
                 }`}
               >
                 {m.label}
+              </button>
+            ))}
+          </div>
+          <div className="flex items-center gap-1 rounded-lg border border-border/70 bg-secondary/20 p-1">
+            {STATUS_FILTERS.map((s) => (
+              <button
+                key={s.value}
+                onClick={() => setStatus(s.value)}
+                className={`rounded-md px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.12em] transition-colors ${
+                  status === s.value
+                    ? "bg-secondary text-foreground"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {s.label}
               </button>
             ))}
           </div>

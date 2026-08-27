@@ -51,7 +51,11 @@ export const projectsQuery = () =>
 export const findingsPageQuery = (
   limit: number,
   offset: number,
-  filters: Pick<FindingsQuery, "q" | "project_id" | "scan_id" | "scanner"> = {},
+  filters: Pick<
+    FindingsQuery,
+    "q" | "project_id" | "scan_id" | "scanner" | "status" | "include_duplicates"
+  > = {},
+
 ) =>
   queryOptions({
     queryKey: ["findings-page", limit, offset, filters],

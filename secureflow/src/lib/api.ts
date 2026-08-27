@@ -50,8 +50,19 @@ export type ApiFinding = {
   priority_score?: number | string | null;
   priority_basis?: string | null;
   priority_risk_level?: string | null;
+  owner?: string | null;
+  notes?: string | null;
+  /** Set when this row is a duplicate detection of another (canonical) finding. */
+  duplicate_of?: number | null;
+  /** How many other detections point at this finding (canonical rows only). */
+  duplicate_count?: number;
+  /** Internal identity hash — never displayed. */
+  fingerprint?: string | null;
+  scan_type?: string | null;
+  scan_started_at?: string | null;
   [k: string]: unknown;
 };
+
 
 export type FindingsResponse = { count: number; total?: number; findings: ApiFinding[] };
 
@@ -82,14 +93,18 @@ export type ApiScan = {
 export type ApiComplianceFramework = {
   name?: string;
   framework?: string;
-  score?: number;
-  percentage?: number;
+  score?: number | null;
+  percentage?: number | null;
   passed?: number;
   total?: number;
   controls_passed?: number;
   controls_total?: number;
+  /** False when no completed scan is in scope: score is null, not 0. */
+  assessed?: boolean;
   [k: string]: unknown;
 };
+
+export type FindingStatus = "Open" | "Triaged" | "Fixed" | "Accepted";
 
 export type FindingsQuery = {
   project_id?: string | number;
@@ -97,9 +112,12 @@ export type FindingsQuery = {
   severity?: ApiSeverity;
   scanner?: string;
   q?: string;
+  status?: FindingStatus;
+  include_duplicates?: boolean;
   limit?: number;
   offset?: number;
 };
+
 
 export type ApiGateRun = {
   id: string | number;
@@ -161,7 +179,7 @@ export type ApiOrgMember = {
 export type ApiIntegration = {
   id: number;
   organization_id: number;
-  provider: "github" | "gitlab" | "dockerhub" | "ecr" | "ghcr";
+  provider: "github" | "gitlab" | "bitbucket" | "dockerhub" | "ecr" | "ghcr";
   name: string;
   metadata: Record<string, unknown>;
   status: "connected" | "revoked";
@@ -375,7 +393,16 @@ export type ReportPdfRequest = {
 
 export const api = {
   listFindings: (q: FindingsQuery = {}) => request<FindingsResponse>(`/api/findings${qs(q)}`),
+  getFinding: (id: string | number) => request<ApiFinding>(`/api/findings/${id}`),
+  listFindingDuplicates: (id: string | number) =>
+    request<{ duplicates: ApiFinding[] }>(`/api/findings/${id}/duplicates`),
+  /** Lifecycle triage. 400 if the target finding is itself a duplicate. */
+  updateFinding: (
+    id: string | number,
+    body: { status?: string; owner?: string; notes?: string },
+  ) => request<ApiFinding>(`/api/findings/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   clearFindings: () => request<{ deleted: number }>("/api/findings", { method: "DELETE" }),
+
   /** Destructive workspace reset: deletes the user's findings, scans and projects. */
   clearWorkspace: () =>
     request<{ findings?: number; scans?: number; projects?: number; deleted?: number }>(
@@ -529,6 +556,25 @@ export const api = {
   scanGitlabRepository: (organizationId: number, integrationId: number) =>
     request<{ repository: ApiRepository; findings: unknown[] }>(
       `/integrations/organizations/${organizationId}/integrations/${integrationId}/gitlab/scan`,
+      { method: "POST" },
+    ),
+
+  bitbucketAuthorize: (organizationId: number) =>
+    request<{ authorize_url: string }>(
+      `/integrations/bitbucket/authorize?organization_id=${organizationId}`,
+    ),
+  bitbucketRepositories: (organizationId: number, integrationId: number) =>
+    request<{ repositories: ApiRepository[] }>(
+      `/integrations/organizations/${organizationId}/integrations/${integrationId}/bitbucket/repositories`,
+    ),
+  selectBitbucketRepository: (organizationId: number, integrationId: number, fullName: string) =>
+    request<{ integration: ApiIntegration; repository: ApiRepository }>(
+      `/integrations/organizations/${organizationId}/integrations/${integrationId}/bitbucket/repository`,
+      { method: "PUT", body: JSON.stringify({ full_name: fullName }) },
+    ),
+  scanBitbucketRepository: (organizationId: number, integrationId: number) =>
+    request<{ repository: ApiRepository; findings: unknown[] }>(
+      `/integrations/organizations/${organizationId}/integrations/${integrationId}/bitbucket/scan`,
       { method: "POST" },
     ),
 

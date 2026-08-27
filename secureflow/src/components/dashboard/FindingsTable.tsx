@@ -1,5 +1,13 @@
 import { memo, useMemo } from "react";
-import { EmptyState, ErrorState, SeverityBadge, TableSkeleton } from "./primitives";
+import {
+  EmptyState,
+  ErrorState,
+  SeverityBadge,
+  StatusBadge,
+  DuplicateBadge,
+  TableSkeleton,
+} from "./primitives";
+
 import { MIXED_COLUMNS, MODULE_COLUMNS, Mono, pruneColumns, uniformModule } from "./findingColumns";
 import { Button } from "@/components/ui/button";
 import { relativeTime, SEVERITY_ORDER, type Finding, type ModuleKey } from "@/lib/security";
@@ -90,6 +98,7 @@ export const FindingsTable = memo(function FindingsTable({
             {showProject && <th className="px-3 py-2 font-medium">Project</th>}
             {showModuleCol && <th className="px-3 py-2 font-medium">Module</th>}
             {!detailed && <th className="px-3 py-2 font-medium">Severity</th>}
+            {!detailed && <th className="px-3 py-2 font-medium">Status</th>}
             <th className="px-3 py-2 text-right font-medium">Age</th>
             {onView && <th className="px-5 py-2 text-right font-medium">View</th>}
           </tr>
@@ -109,7 +118,12 @@ export const FindingsTable = memo(function FindingsTable({
                 ))
               ) : (
                 <td className="px-3 py-2.5">
-                  <div className="max-w-[46ch] truncate font-medium text-foreground">{f.title}</div>
+                  <div className="flex items-center gap-2">
+                    <span className="max-w-[46ch] truncate font-medium text-foreground">
+                      {f.title}
+                    </span>
+                    <DuplicateBadge count={f.duplicateCount} />
+                  </div>
                   {f.location && <Mono>{f.location}</Mono>}
                 </td>
               )}
@@ -124,6 +138,11 @@ export const FindingsTable = memo(function FindingsTable({
               {!detailed && (
                 <td className="px-3 py-2.5">
                   <SeverityBadge level={f.severity} />
+                </td>
+              )}
+              {!detailed && (
+                <td className="px-3 py-2.5">
+                  <StatusBadge status={f.status} />
                 </td>
               )}
               <td className="px-3 py-2.5 text-right font-mono text-[11px] tabular-nums text-muted-foreground">

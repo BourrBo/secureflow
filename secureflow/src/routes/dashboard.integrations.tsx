@@ -63,6 +63,7 @@ import {
   Container,
   Github,
   GitBranch,
+  GitFork,
   KeyRound,
   Plug,
   Plus,
@@ -448,7 +449,54 @@ function MembersPanel({ organizationId }: { organizationId: number }) {
   );
 }
 
-/* ── Source control: GitHub + GitLab ─────────────────────────────── */
+/* ── Source control: GitHub + GitLab + Bitbucket ──────────────────── */
+
+type SourceProvider = "github" | "gitlab" | "bitbucket";
+
+const SOURCE_PROVIDER_CONFIG: Record<
+  SourceProvider,
+  {
+    label: string;
+    icon: typeof Github;
+    description: string;
+    authorize: (organizationId: number) => ReturnType<typeof api.githubAuthorize>;
+    listRepositories: (
+      organizationId: number,
+      integrationId: number,
+    ) => ReturnType<typeof api.githubRepositories>;
+    selectRepository: (
+      organizationId: number,
+      integrationId: number,
+      fullName: string,
+    ) => ReturnType<typeof api.selectGithubRepository>;
+  }
+> = {
+  github: {
+    label: "GitHub",
+    icon: Github,
+    description: "Connect GitHub → OAuth → repository list → select repo → scan.",
+    authorize: api.githubAuthorize,
+    listRepositories: api.githubRepositories,
+    selectRepository: api.selectGithubRepository,
+  },
+  gitlab: {
+    label: "GitLab",
+    icon: GitBranch,
+    description:
+      "Connect GitLab (gitlab.com or self-hosted) → authorize → pick a project → scan.",
+    authorize: api.gitlabAuthorize,
+    listRepositories: api.gitlabRepositories,
+    selectRepository: api.selectGitlabRepository,
+  },
+  bitbucket: {
+    label: "Bitbucket",
+    icon: GitFork,
+    description: "Connect Bitbucket → OAuth → repository list → select repo → scan.",
+    authorize: api.bitbucketAuthorize,
+    listRepositories: api.bitbucketRepositories,
+    selectRepository: api.selectBitbucketRepository,
+  },
+};
 
 /**
  * Only ever fires for a validated, positive organization ID — never for the
@@ -471,17 +519,15 @@ function SourceControlProvider({
   integrations,
 }: {
   organizationId: number;
-  provider: "github" | "gitlab";
+  provider: SourceProvider;
   integrations: ApiIntegration[];
 }) {
   const qc = useQueryClient();
+  const config = SOURCE_PROVIDER_CONFIG[provider];
   const active = integrations.filter((i) => i.provider === provider && i.status === "connected");
 
   const connect = useMutation({
-    mutationFn: () =>
-      provider === "github"
-        ? api.githubAuthorize(organizationId)
-        : api.gitlabAuthorize(organizationId),
+    mutationFn: () => config.authorize(organizationId),
     onSuccess: (r) => {
       window.location.href = r.authorize_url;
     },
@@ -500,25 +546,21 @@ function SourceControlProvider({
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <p className="text-[12px] text-muted-foreground">
-          {provider === "github"
-            ? "Connect GitHub → OAuth → repository list → select repo → scan."
-            : "Connect GitLab (gitlab.com or self-hosted) → authorize → pick a project → scan."}
-        </p>
+        <p className="text-[12px] text-muted-foreground">{config.description}</p>
         <Button
           size="sm"
           variant="hero"
           disabled={connect.isPending}
           onClick={() => connect.mutate()}
         >
-          <Plug className="h-3.5 w-3.5" /> Connect {provider === "github" ? "GitHub" : "GitLab"}
+          <Plug className="h-3.5 w-3.5" /> Connect {config.label}
         </Button>
       </div>
 
       {active.length === 0 ? (
         <EmptyState
-          icon={provider === "github" ? Github : GitBranch}
-          title={`No ${provider === "github" ? "GitHub" : "GitLab"} connection yet`}
+          icon={config.icon}
+          title={`No ${config.label} connection yet`}
           description="Connect to browse repositories and run scans without pasting credentials."
         />
       ) : (
@@ -546,26 +588,23 @@ function RepositoryCard({
 }: {
   organizationId: number;
   integration: ApiIntegration;
-  provider: "github" | "gitlab";
+  provider: SourceProvider;
   onDisconnect: () => void;
 }) {
   const qc = useQueryClient();
   const [browsing, setBrowsing] = useState(false);
+  const config = SOURCE_PROVIDER_CONFIG[provider];
 
   const repos = useQuery({
     queryKey: ["repositories", provider, organizationId, integration.id],
     queryFn: () =>
-      provider === "github"
-        ? api.githubRepositories(organizationId, integration.id).then((r) => r.repositories)
-        : api.gitlabRepositories(organizationId, integration.id).then((r) => r.repositories),
+      config.listRepositories(organizationId, integration.id).then((r) => r.repositories),
     enabled: browsing,
   });
 
   const select = useMutation({
     mutationFn: (fullName: string) =>
-      provider === "github"
-        ? api.selectGithubRepository(organizationId, integration.id, fullName)
-        : api.selectGitlabRepository(organizationId, integration.id, fullName),
+      config.selectRepository(organizationId, integration.id, fullName),
     onSuccess: () => {
       toast.success("Repository selected");
       setBrowsing(false);
@@ -1189,7 +1228,17 @@ function IntegrationsPage() {
 
   useEffect(() => {
     if (search?.connected) {
-      toast.success(`${search.connected === "github" ? "GitHub" : "GitLab"} connected`);
+      toast.success(
+        `${
+          search.connected === "github"
+            ? "GitHub"
+            : search.connected === "gitlab"
+              ? "GitLab"
+              : search.connected === "bitbucket"
+                ? "Bitbucket"
+                : "Integration"
+        } connected`,
+      );
     } else if (search?.error) {
       toast.error("Connection failed", { description: search.error });
     }
@@ -1280,6 +1329,9 @@ function IntegrationsPage() {
                     <TabsTrigger value="gitlab">
                       <GitBranch className="h-3.5 w-3.5" /> GitLab
                     </TabsTrigger>
+                    <TabsTrigger value="bitbucket">
+                      <GitFork className="h-3.5 w-3.5" /> Bitbucket
+                    </TabsTrigger>
                   </TabsList>
                   <TabsContent value="github" className="pt-4">
                     <SourceControlProvider
@@ -1295,12 +1347,15 @@ function IntegrationsPage() {
                       integrations={integrations}
                     />
                   </TabsContent>
+                  <TabsContent value="bitbucket" className="pt-4">
+                    <SourceControlProvider
+                      organizationId={organizationId_}
+                      provider="bitbucket"
+                      integrations={integrations}
+                    />
+                  </TabsContent>
                 </Tabs>
               )}
-              <p className="mt-4 text-[11px] text-muted-foreground">
-                Bitbucket support follows once this pattern has been in production for both
-                providers above.
-              </p>
             </Panel>
 
             <RegistriesPanel organizationId={organizationId_} integrations={integrations} />

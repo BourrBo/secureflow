@@ -94,23 +94,34 @@ function Compliance() {
                   </div>
                   <div className="min-w-0">
                     <div className="truncate text-[13px] font-semibold">{f.name}</div>
-                    {f.controls && (
+                    {f.assessed && f.controls && (
                       <div className="text-[11px] text-muted-foreground">{f.controls} controls</div>
                     )}
                   </div>
-                  <div className="ml-auto font-display text-xl font-semibold tabular-nums gradient-text">
-                    {f.pct}%
+                  {f.assessed && (
+                    <div className="ml-auto font-display text-xl font-semibold tabular-nums gradient-text">
+                      {f.pct}%
+                    </div>
+                  )}
+                </div>
+                {f.assessed ? (
+                  <div className="mt-4 h-1 overflow-hidden rounded-full bg-secondary">
+                    <div
+                      className="h-full rounded-full bg-[image:var(--gradient-primary)]"
+                      style={{ width: `${f.pct}%` }}
+                    />
                   </div>
-                </div>
-                <div className="mt-4 h-1 overflow-hidden rounded-full bg-secondary">
-                  <div
-                    className="h-full rounded-full bg-[image:var(--gradient-primary)]"
-                    style={{ width: `${f.pct}%` }}
-                  />
-                </div>
+                ) : (
+                  // No completed scan in scope: a 0% bar would read as
+                  // "failing" when the truth is "unknown".
+                  <p className="mt-4 text-[11px] leading-relaxed text-muted-foreground">
+                    Not assessed yet — run a scan to see your {f.name} posture.
+                  </p>
+                )}
               </Panel>
             </button>
           ))}
+
         </div>
       )}
 

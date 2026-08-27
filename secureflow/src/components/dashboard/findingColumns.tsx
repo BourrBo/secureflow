@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
-import { SeverityBadge, PriorityBadge } from "./primitives";
+import { SeverityBadge, PriorityBadge, StatusBadge, DuplicateBadge } from "./primitives";
+
 import {
   iacCategory,
   priorityTooltip,
@@ -43,10 +44,24 @@ export const Chip = ({ children, tone = "" }: { children: ReactNode; tone?: stri
 
 /* ── Shared columns ─────────────────────────────────────────────── */
 
+/** Title cell with the "also detected N times" marker inline. */
+const titleCell = (f: Finding) => (
+  <span className="inline-flex items-center gap-2">
+    <span className="font-medium text-foreground">{f.title}</span>
+    <DuplicateBadge count={f.duplicateCount} />
+  </span>
+);
+
 export const colTitle: Col = {
   key: "title",
   label: "Finding",
-  cell: (f) => <span className="font-medium text-foreground">{f.title}</span>,
+  cell: titleCell,
+};
+
+export const colStatus: Col = {
+  key: "status",
+  label: "Status",
+  cell: (f) => <StatusBadge status={f.status} />,
 };
 
 export const colSeverity: Col = {
@@ -54,6 +69,7 @@ export const colSeverity: Col = {
   label: "Severity",
   cell: (f) => <SeverityBadge level={f.severity} />,
 };
+
 
 export const colFileLine: Col = {
   key: "file",
@@ -115,8 +131,9 @@ export const colPriority: Col = {
 const colPackage: Col = {
   key: "package",
   label: "Package",
-  cell: (f) => <span className="font-medium text-foreground">{f.title}</span>,
+  cell: titleCell,
 };
+
 
 const colEcosystem: Col = {
   key: "ecosystem",
@@ -195,6 +212,7 @@ export const MODULE_COLUMNS: Record<ModuleKey, Col[]> = {
     colOwasp,
     colIso,
     colPriority,
+    colStatus,
   ],
   sca: [
     colPackage,
@@ -207,6 +225,7 @@ export const MODULE_COLUMNS: Record<ModuleKey, Col[]> = {
     colSeverity,
     colIso,
     colPriority,
+    colStatus,
   ],
   secrets: [
     {
@@ -229,6 +248,7 @@ export const MODULE_COLUMNS: Record<ModuleKey, Col[]> = {
     colSeverity,
     colIso,
     colPriority,
+    colStatus,
   ],
   iac: [
     { key: "rule", label: "Check ID / Rule", cell: (f) => <Mono>{dash(f.rule)}</Mono> },
@@ -247,6 +267,7 @@ export const MODULE_COLUMNS: Record<ModuleKey, Col[]> = {
     colSeverity,
     colIso,
     colPriority,
+    colStatus,
   ],
   container: [
     colPackage,
@@ -259,6 +280,7 @@ export const MODULE_COLUMNS: Record<ModuleKey, Col[]> = {
     colSeverity,
     colIso,
     colPriority,
+    colStatus,
   ],
   dast: [
     colSeverity,
@@ -290,6 +312,7 @@ export const MODULE_COLUMNS: Record<ModuleKey, Col[]> = {
     },
     colIso,
     colPriority,
+    colStatus,
   ],
 };
 
@@ -305,6 +328,7 @@ export const MIXED_COLUMNS: Col[] = [
   colIso,
   colSeverity,
   colPriority,
+  colStatus,
 ];
 
 /** Drops columns that carry no data for any row in the current result set. */

@@ -83,6 +83,13 @@ export type Finding = {
   location: string;
   createdAt: Date | null;
   status: string;
+  owner: string;
+  notes: string;
+  /** Set when this row is a duplicate detection of another finding. */
+  duplicateOf: string | null;
+  /** Other detections pointing at this finding (canonical rows only). */
+  duplicateCount: number;
+
   /** Raw backend payload, kept for report export. */
   raw: ApiFinding;
   description: string;
@@ -153,6 +160,12 @@ export function normalizeFinding(f: ApiFinding, index: number): Finding {
     location: file ? (f.line ? `${file}:${f.line}` : file) : "",
     createdAt: created && !Number.isNaN(created.getTime()) ? created : null,
     status: String(f.status ?? "open"),
+    owner: str(f.owner),
+    notes: str(f.notes),
+    duplicateOf:
+      f.duplicate_of === null || f.duplicate_of === undefined ? null : String(f.duplicate_of),
+    duplicateCount: typeof f.duplicate_count === "number" ? f.duplicate_count : 0,
+
     raw: f,
     description: str(f.description || f.message),
     rule: str(f.rule || f.rule_id),
@@ -264,9 +277,19 @@ export function normalizeScan(s: ApiScan): Scan {
   };
 }
 
-export type Framework = { name: string; pct: number; controls: string | null };
+export type Framework = {
+  name: string;
+  /** Only meaningful when `assessed` is true. */
+  pct: number;
+  controls: string | null;
+  /** False when there is no completed scan in scope — never render a % then. */
+  assessed: boolean;
+};
 
 export function normalizeFramework(f: ApiComplianceFramework): Framework {
+  // A missing `assessed` field means an older backend that always scored,
+  // so default to true rather than hiding real data.
+  const assessed = typeof f.assessed === "boolean" ? f.assessed : true;
   const pctRaw =
     typeof f.percentage === "number" ? f.percentage : typeof f.score === "number" ? f.score : 0;
   const pct = Math.max(0, Math.min(100, Math.round(pctRaw <= 1 ? pctRaw * 100 : pctRaw)));
@@ -274,11 +297,13 @@ export function normalizeFramework(f: ApiComplianceFramework): Framework {
   const total = f.controls_total ?? f.total;
   return {
     name: String(f.name ?? f.framework ?? "Framework"),
-    pct,
+    pct: assessed ? pct : 0,
     controls:
       typeof passed === "number" && typeof total === "number" ? `${passed} / ${total}` : null,
+    assessed,
   };
 }
+
 
 export function countBySeverity(findings: Finding[]) {
   const c: Record<Severity, number> = { critical: 0, high: 0, medium: 0, low: 0, info: 0 };
@@ -330,4 +355,15 @@ export function securityScore(findings: Finding[]) {
   const scale = 40;
   const score = 100 * (scale / (scale + weighted));
   return Math.max(0, Math.min(100, Math.round(score)));
+}
+
+/** Lifecycle states a finding can be triaged into. */
+export const FINDING_STATUSES = ["Open", "Triaged", "Fixed", "Accepted"] as const;
+export type FindingStatusKey = (typeof FINDING_STATUSES)[number];
+
+/** Backend statuses arrive with inconsistent casing; normalize for display. */
+export function normalizeStatus(raw?: string): FindingStatusKey {
+  const s = (raw ?? "").toLowerCase().trim();
+  const hit = FINDING_STATUSES.find((v) => v.toLowerCase() === s);
+  return hit ?? "Open";
 }

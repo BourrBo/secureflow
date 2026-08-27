@@ -11,7 +11,7 @@ import { toast } from "sonner";
 import { api } from "./api";
 import { useNotifications } from "./notifications";
 
-export type IntegrationScanKind = "github" | "gitlab" | "registry";
+export type IntegrationScanKind = "github" | "gitlab" | "bitbucket" | "registry";
 
 export type IntegrationScanKey = string;
 
@@ -69,7 +69,9 @@ export function IntegrationScanProvider({ children }: { children: ReactNode }) {
               ? await api.scanGithubRepository(organizationId, integrationId)
               : kind === "gitlab"
                 ? await api.scanGitlabRepository(organizationId, integrationId)
-                : await api.scanRegistryImage(organizationId, integrationId);
+                : kind === "bitbucket"
+                  ? await api.scanBitbucketRepository(organizationId, integrationId)
+                  : await api.scanRegistryImage(organizationId, integrationId);
           const count = Array.isArray(res.findings) ? res.findings.length : 0;
           const target = "image" in res && res.image ? res.image : label;
           setResults((prev) => ({

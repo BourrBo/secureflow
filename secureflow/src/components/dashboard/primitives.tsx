@@ -1,6 +1,8 @@
 import { memo, type ElementType, type ReactNode } from "react";
-import { ArrowUpRight, ArrowDownRight, Inbox, PlugZap } from "lucide-react";
+import { ArrowUpRight, ArrowDownRight, Inbox, PlugZap, Copy } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
+import { normalizeStatus } from "@/lib/security";
+
 
 export function PageHeader({
   eyebrow,
@@ -155,6 +157,39 @@ export function PriorityBadge({
     </span>
   );
 }
+
+/** Lifecycle state of a finding — same outlined shape as SeverityBadge. */
+export function StatusBadge({ status }: { status: string }) {
+  const key = normalizeStatus(status);
+  const map = {
+    Open: "border-muted-foreground/30 bg-muted/50 text-muted-foreground",
+    Triaged: "border-info/40 bg-info/10 text-info",
+    Fixed: "border-success/40 bg-success/10 text-success",
+    Accepted: "border-warning/40 bg-warning/10 text-warning",
+  } as const;
+  return (
+    <span
+      className={`inline-flex items-center rounded-md border px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-[0.12em] ${map[key]}`}
+    >
+      {key}
+    </span>
+  );
+}
+
+/** Compact "×N" marker: this finding was detected N more times elsewhere. */
+export function DuplicateBadge({ count }: { count: number }) {
+  if (count <= 0) return null;
+  return (
+    <span
+      title={`Also detected by ${count} other scan${count === 1 ? "" : "s"} or scanner${count === 1 ? "" : "s"}`}
+      className="inline-flex items-center gap-1 rounded-full border border-border/70 bg-secondary/40 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground"
+    >
+      <Copy className="h-2.5 w-2.5" />×{count}
+    </span>
+  );
+}
+
+
 
 export function Panel({
   title,
