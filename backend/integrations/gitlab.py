@@ -75,6 +75,10 @@ def _gitlab_get(path: str, token: str, params: dict | None = None) -> httpx.Resp
         raise HTTPException(status_code=503, detail="GitLab API unavailable") from exc
     if response.status_code == 401:
         raise HTTPException(status_code=401, detail="GitLab connection is no longer authorized")
+    if response.status_code == 403:
+        raise HTTPException(status_code=403, detail="GitLab denied this request (missing permission)")
+    if response.status_code == 429:
+        raise HTTPException(status_code=429, detail="GitLab rate limit reached, try again shortly")
     if response.status_code >= 400:
         raise HTTPException(status_code=502, detail="GitLab API request failed")
     return response

@@ -70,6 +70,10 @@ def _bitbucket_get(path: str, token: str, params: dict | None = None) -> httpx.R
         raise HTTPException(status_code=503, detail="Bitbucket API unavailable") from exc
     if response.status_code == 401:
         raise HTTPException(status_code=401, detail="Bitbucket connection is no longer authorized")
+    if response.status_code == 403:
+        raise HTTPException(status_code=403, detail="Bitbucket denied this request (missing permission)")
+    if response.status_code == 429:
+        raise HTTPException(status_code=429, detail="Bitbucket rate limit reached, try again shortly")
     if response.status_code >= 400:
         raise HTTPException(status_code=502, detail="Bitbucket API request failed")
     return response
@@ -84,15 +88,19 @@ def authenticated_user(token: str) -> dict:
 
 
 def list_repositories(token: str, page: int, per_page: int) -> list[dict]:
-    # /user/permissions/repositories lists every repo the token's user has
-    # access to across all workspaces in one call, unlike the workspace-
-    # scoped /repositories/{workspace} endpoint.
+    # /user/permissions/repositories (used previously) 404s for tokens
+    # issued by a classic Workspace Settings -> OAuth consumer app (the
+    # "-bitbucket-legacy" scope suffix Atlassian's identity platform issues
+    # for that app type) -- confirmed against a real connected account.
+    # /repositories?role=member is the endpoint that actually works for
+    # that token type: every repo across every workspace the user is at
+    # least a member of, same pagination shape.
     payload = _bitbucket_get(
-        "/user/permissions/repositories",
+        "/repositories",
         token,
-        {"page": page, "pagelen": per_page},
+        {"role": "member", "page": page, "pagelen": per_page},
     ).json()
-    return [repository_summary(entry["repository"]) for entry in payload.get("values", []) if entry.get("repository")]
+    return [repository_summary(repo) for repo in payload.get("values", [])]
 
 
 def get_repository(token: str, full_name: str) -> dict:

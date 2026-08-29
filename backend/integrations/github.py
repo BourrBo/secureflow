@@ -102,6 +102,10 @@ def _github_get(path: str, token: str, params: dict | None = None) -> httpx.Resp
         raise HTTPException(status_code=503, detail="GitHub API unavailable") from exc
     if response.status_code == 401:
         raise HTTPException(status_code=401, detail="GitHub connection is no longer authorized")
+    if response.status_code == 403:
+        raise HTTPException(status_code=403, detail="GitHub denied this request (missing permission or rate limited)")
+    if response.status_code == 429:
+        raise HTTPException(status_code=429, detail="GitHub rate limit reached, try again shortly")
     if response.status_code >= 400:
         raise HTTPException(status_code=502, detail="GitHub API request failed")
     return response
