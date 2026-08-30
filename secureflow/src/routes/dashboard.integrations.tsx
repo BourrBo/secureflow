@@ -44,6 +44,8 @@ import {
 import {
   api,
   isForbidden,
+  ApiHttpError,
+
   type ApiIntegration,
   type ApiMyOrganization,
   type ApiOrgRole,
@@ -572,7 +574,10 @@ function SourceControlProvider({
               integration={integration}
               provider={provider}
               onDisconnect={() => disconnect.mutate(integration.id)}
+              onReconnect={() => connect.mutate()}
+              reconnecting={connect.isPending}
             />
+
           ))}
         </div>
       )}
@@ -585,11 +590,15 @@ function RepositoryCard({
   integration,
   provider,
   onDisconnect,
+  onReconnect,
+  reconnecting,
 }: {
   organizationId: number;
   integration: ApiIntegration;
   provider: SourceProvider;
   onDisconnect: () => void;
+  onReconnect: () => void;
+  reconnecting?: boolean;
 }) {
   const qc = useQueryClient();
   const [browsing, setBrowsing] = useState(false);
@@ -600,7 +609,13 @@ function RepositoryCard({
     queryFn: () =>
       config.listRepositories(organizationId, integration.id).then((r) => r.repositories),
     enabled: browsing,
+    // 401/403/404 never becomes a 200 by retrying — surface the real problem.
+    retry: (count, error) =>
+      !isForbidden(error) &&
+      !(error instanceof ApiHttpError && error.status === 401) &&
+      count < 1,
   });
+
 
   const select = useMutation({
     mutationFn: (fullName: string) =>
@@ -692,7 +707,22 @@ function RepositoryCard({
       {browsing && (
         <div className="mt-3 max-h-64 overflow-y-auto rounded-md border border-border/60">
           {repos.error ? (
-            <ErrorState error={repos.error} />
+            <ErrorState
+              error={repos.error}
+              action={
+                repos.error instanceof ApiHttpError && repos.error.status === 401 ? (
+                  <Button
+                    size="sm"
+                    variant="hero"
+                    disabled={reconnecting}
+                    onClick={onReconnect}
+                  >
+                    <Plug className="h-3.5 w-3.5" /> Reconnect {config.label}
+                  </Button>
+                ) : undefined
+              }
+            />
+
           ) : repos.isLoading ? (
             <div className="p-3">
               <TableSkeleton rows={4} cols={1} />

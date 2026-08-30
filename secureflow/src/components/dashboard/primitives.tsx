@@ -2,6 +2,8 @@ import { memo, type ElementType, type ReactNode } from "react";
 import { ArrowUpRight, ArrowDownRight, Inbox, PlugZap, Copy } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { normalizeStatus } from "@/lib/security";
+import { ApiHttpError } from "@/lib/api";
+
 
 
 export function PageHeader({
@@ -251,19 +253,35 @@ export function EmptyState({
   );
 }
 
+const HTTP_HEADINGS: Record<number, string> = {
+  401: "Connection expired",
+  403: "Access denied",
+  404: "Not found",
+  429: "Rate limited",
+  502: "Request failed",
+  503: "Request failed",
+};
+
 export function ErrorState({ error, action }: { error: unknown; action?: ReactNode }) {
   const message = error instanceof Error ? error.message : "Something went wrong.";
+  // Only a genuine fetch() failure means the backend is actually unreachable.
+  // An HTTP response — even a 5xx — means we reached it and one request failed.
+  const heading =
+    error instanceof ApiHttpError
+      ? (HTTP_HEADINGS[error.status] ?? "Something went wrong")
+      : "Backend unavailable";
   return (
     <div className="grid place-items-center rounded-lg border border-dashed border-warning/40 bg-warning/5 px-6 py-12 text-center">
       <div className="grid h-11 w-11 place-items-center rounded-xl bg-warning/10 text-warning ring-1 ring-warning/20">
         <PlugZap className="h-5 w-5" />
       </div>
-      <div className="mt-3 text-sm font-medium text-foreground">Backend unavailable</div>
+      <div className="mt-3 text-sm font-medium text-foreground">{heading}</div>
       <p className="mt-1 max-w-md text-[13px] text-muted-foreground">{message}</p>
       {action && <div className="mt-4">{action}</div>}
     </div>
   );
 }
+
 
 export function TableSkeleton({ rows = 6, cols = 5 }: { rows?: number; cols?: number }) {
   return (
