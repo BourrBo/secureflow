@@ -1,6 +1,7 @@
 import logging
 import os
 import shutil
+import stat
 import subprocess
 import tempfile
 import time
@@ -42,11 +43,12 @@ def build_authenticated_url(clone_url: str, token: str, provider: str) -> str:
     Only ever used in-process to build the argument passed to `git clone`
     for this one subprocess call — never logged, never persisted, never
     returned to a caller. GitHub accepts any non-empty username with the
-    token as the password; GitLab's convention is the `oauth2` username.
+    token as the password; GitLab's convention is the `oauth2` username;
+    Bitbucket's OAuth access tokens use the `x-token-auth` username.
     """
     if not clone_url.startswith("https://"):
         raise ValueError("Authenticated clone requires an https:// URL")
-    username = "oauth2" if provider == "gitlab" else "x-access-token"
+    username = {"gitlab": "oauth2", "bitbucket": "x-token-auth"}.get(provider, "x-access-token")
     return clone_url.replace("https://", f"https://{username}:{token}@", 1)
 
 
@@ -93,32 +95,97 @@ def clone_repo(repo_url: str, *, log_url: str | None = None):
     return temp_dir
 
 
+def _clear_readonly_and_retry(func, path, exc_info):
+    """`onerror` handler for shutil.rmtree.
+
+    This is the actual, deterministic reason temp clone directories piled
+    up on Windows (not an antivirus/indexer lock, despite what the retry
+    logic below originally assumed): git marks files under `.git/objects/`
+    and `.git/refs/` read-only on Windows as part of its normal object-
+    database behavior. `shutil.rmtree` then fails with `PermissionError:
+    [WinError 5] Access is denied` on every single clone, deterministically
+    — sleeping and retrying does nothing for a permissions error, only for
+    a transient lock, which is why the retry below alone wasn't preventing
+    the buildup. This clears the read-only bit and retries the specific
+    failed operation.
+    """
+    try:
+        os.chmod(path, stat.S_IWRITE)
+        func(path)
+    except OSError:
+        # Best-effort — outer cleanup_repo() still retries/logs on failure.
+        # Narrowed from a blanket `except Exception` (ruff BLE001) since
+        # every real failure mode here (chmod/unlink/rmdir on a locked or
+        # already-gone file) is an OSError subclass; anything else is a
+        # genuine bug that should surface, not be swallowed.
+        logger.debug("Could not clear read-only bit / remove %s", path, exc_info=True)
+
+
 def cleanup_repo(repo_path: str):
     """Best-effort cleanup — every existing call site (sast.py, sca.py,
     secrets.py) calls this fire-and-forget after a scan and never checks
-    a return value, so this must never raise. Previously this was a bare
-    shutil.rmtree(ignore_errors=True): a failed delete (most commonly a
-    Windows file lock — antivirus or the search indexer briefly holding a
-    handle open right after a large clone) was completely invisible, and
-    tmp_scans/ would quietly accumulate orphaned directories over time.
-    Now it retries once after a short delay — long enough for a transient
-    lock to clear — and logs a warning if it still can't be removed, so
-    the growth is at least visible instead of silent."""
+    a return value, so this must never raise. Clears git's read-only file
+    attributes (see _clear_readonly_and_retry) on every attempt, since that
+    was the actual, deterministic cause of temp directories accumulating —
+    then retries once after a short delay for the much rarer case of a
+    genuine transient lock (antivirus/indexer), and logs a warning if it
+    still can't be removed, so any remaining growth is at least visible
+    instead of silent."""
     try:
-        shutil.rmtree(repo_path)
-        return
+        shutil.rmtree(repo_path, onerror=_clear_readonly_and_retry)
+        if not os.path.exists(repo_path):
+            return
     except FileNotFoundError:
         return
-    except OSError as exc:
-        logger.debug("First cleanup attempt failed for %s (%s) — retrying once", repo_path, exc)
-        time.sleep(_CLEANUP_RETRY_DELAY_SECS)
-        try:
-            shutil.rmtree(repo_path)
-        except FileNotFoundError:
-            return
-        except OSError as exc2:
+    except OSError:
+        pass
+
+    logger.debug("First cleanup attempt left %s behind — retrying once", repo_path)
+    time.sleep(_CLEANUP_RETRY_DELAY_SECS)
+    try:
+        shutil.rmtree(repo_path, onerror=_clear_readonly_and_retry)
+        if os.path.exists(repo_path):
             logger.warning(
-                "Could not remove temp scan directory %s after retry (%s). "
+                "Could not fully remove temp scan directory %s after retry. "
                 "It will be left behind — safe to delete manually.",
-                repo_path, exc2,
+                repo_path,
             )
+    except FileNotFoundError:
+        return
+    except OSError as exc2:
+        logger.warning(
+            "Could not remove temp scan directory %s after retry (%s). "
+            "It will be left behind — safe to delete manually.",
+            repo_path, exc2,
+        )
+
+
+def sweep_orphaned_scans(max_age_hours: float = 24) -> int:
+    """Delete leftover tmp_scans/tmp* directories older than max_age_hours.
+
+    Call once at backend startup. This is a safety net, not the primary
+    fix — cleanup_repo()/cleanup_upload() clearing git's read-only bit
+    should mean scans stop leaving anything behind at all — but it also
+    clears out whatever's already accumulated from before this fix, and
+    covers any future cleanup failure (crash mid-scan, disk issue, etc.)
+    that fire-and-forget cleanup can't catch. Returns the number of
+    directories removed.
+    """
+    if not os.path.isdir(_TMP_ROOT):
+        return 0
+    cutoff = time.time() - (max_age_hours * 3600)
+    removed = 0
+    for entry in os.scandir(_TMP_ROOT):
+        if not entry.is_dir() or not entry.name.startswith("tmp"):
+            continue
+        try:
+            if entry.stat().st_mtime > cutoff:
+                continue
+            shutil.rmtree(entry.path, onerror=_clear_readonly_and_retry)
+            if not os.path.exists(entry.path):
+                removed += 1
+        except OSError as exc:
+            logger.warning("Could not sweep orphaned scan directory %s (%s)", entry.path, exc)
+    if removed:
+        logger.info("Swept %d orphaned scan director%s from tmp_scans on startup", removed, "y" if removed == 1 else "ies")
+    return removed

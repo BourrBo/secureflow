@@ -72,6 +72,32 @@ def initialize() -> None:
             ALTER TABLE sf_integrations ADD CONSTRAINT sf_integrations_provider_check
               CHECK (provider IN ('github','gitlab','bitbucket','dockerhub','ecr','ghcr'));
         """)
+        # Only one ACTIVE (connected, not revoked) integration per
+        # organization+provider+account is allowed going forward (see
+        # put_integration's upsert below) -- but CREATE UNIQUE INDEX fails
+        # outright if any environment's data already has duplicates (e.g.
+        # an old local DB copy from before this fix). Self-heal first: keep
+        # only the most-recently-connected active row per identity, revoke
+        # the rest -- identical to what was done once by hand against
+        # production. A clean database has nothing to do here.
+        cur.execute("""
+            WITH ranked AS (
+              SELECT id, row_number() OVER (
+                       PARTITION BY organization_id, provider, name
+                       ORDER BY created_at DESC
+                     ) AS rn
+              FROM sf_integrations
+              WHERE status = 'connected' AND revoked_at IS NULL
+            )
+            UPDATE sf_integrations
+            SET status = 'revoked', revoked_at = now(), encrypted_credentials = ''
+            WHERE id IN (SELECT id FROM ranked WHERE rn > 1);
+        """)
+        cur.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_sf_integrations_active_identity
+              ON sf_integrations (organization_id, provider, name)
+              WHERE status = 'connected' AND revoked_at IS NULL;
+        """)
 
 
 def create_organization(name: str, owner_user_id: str) -> dict:
@@ -110,9 +136,39 @@ def add_member(organization_id: int, user_id: str, role: str) -> dict:
 
 
 def put_integration(organization_id: int, provider: str, name: str, encrypted_credentials: str, metadata: dict, created_by: str) -> dict:
+    """Connects (or reconnects) an integration. Upserts on (organization_id,
+    provider, name) among currently-ACTIVE rows (see the partial unique
+    index idx_sf_integrations_active_identity) -- reconnecting the same
+    account refreshes that account's existing row's credentials/status in
+    place instead of inserting a new one, so:
+      - the dashboard doesn't end up showing a dead "connection expired"
+        card next to the freshly reconnected one for the same account
+      - metadata.selected_repository (if already set) survives a reconnect
+        -- jsonb `||` is a shallow merge, right side wins per key, and a
+        reconnect's incoming metadata never itself carries a
+        selected_repository key, so the existing one passes through
+      - `status`/`revoked_at` reset back to connected/NULL even if the row
+        being reused had somehow been revoked already (defensive; shouldn't
+        normally happen given the partial index only matches active rows,
+        but a plain INSERT is what runs in that case anyway since there's
+        no active row to conflict with)
+    A genuinely new account (or the first-ever connection) still just
+    inserts, since there's nothing active to conflict with."""
     with db() as conn, conn.cursor() as cur:
-        cur.execute("""INSERT INTO sf_integrations (organization_id,provider,name,encrypted_credentials,metadata,created_by)
-                       VALUES (%s,%s,%s,%s,%s,%s) RETURNING id,organization_id,provider,name,metadata,status,created_at,revoked_at""", (organization_id, provider, name, encrypted_credentials, json.dumps(metadata), created_by))
+        cur.execute(
+            """INSERT INTO sf_integrations (organization_id,provider,name,encrypted_credentials,metadata,created_by)
+               VALUES (%s,%s,%s,%s,%s,%s)
+               ON CONFLICT (organization_id, provider, name)
+               WHERE status = 'connected' AND revoked_at IS NULL
+               DO UPDATE SET
+                 encrypted_credentials = EXCLUDED.encrypted_credentials,
+                 metadata = sf_integrations.metadata || EXCLUDED.metadata,
+                 created_by = EXCLUDED.created_by,
+                 status = 'connected',
+                 revoked_at = NULL
+               RETURNING id,organization_id,provider,name,metadata,status,created_at,revoked_at""",
+            (organization_id, provider, name, encrypted_credentials, json.dumps(metadata), created_by),
+        )
         return dict(cur.fetchone())
 
 

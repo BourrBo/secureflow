@@ -88,19 +88,48 @@ def authenticated_user(token: str) -> dict:
 
 
 def list_repositories(token: str, page: int, per_page: int) -> list[dict]:
-    # /user/permissions/repositories (used previously) 404s for tokens
-    # issued by a classic Workspace Settings -> OAuth consumer app (the
-    # "-bitbucket-legacy" scope suffix Atlassian's identity platform issues
-    # for that app type) -- confirmed against a real connected account.
-    # /repositories?role=member is the endpoint that actually works for
-    # that token type: every repo across every workspace the user is at
-    # least a member of, same pagination shape.
-    payload = _bitbucket_get(
-        "/repositories",
+    """Bitbucket has no single 'every repo across every workspace' endpoint
+    that works for this app's OAuth token type -- confirmed against a real
+    connected account, both ways: /user/permissions/repositories 404s, and
+    /repositories?role=member (tried first) 410s even for a token that was
+    issued moments earlier, so it isn't a stale-token problem either --
+    Bitbucket has just removed that query shape for tokens from a classic
+    Workspace Settings -> OAuth consumer app.
+
+    The endpoint that's actually documented and works: enumerate the
+    workspaces this token's user belongs to, then list repositories in
+    each one. `page`/`per_page` paginate the WORKSPACE list (most accounts
+    have only a handful, so this is normally a single page); every repo in
+    each returned workspace is fetched and flattened into one list, capped
+    at a few pages per workspace so an organization with an unusually large
+    workspace can't turn one repository-browser click into an unbounded
+    number of upstream requests.
+    """
+    workspaces_payload = _bitbucket_get(
+        "/workspaces",
         token,
-        {"role": "member", "page": page, "pagelen": per_page},
+        {"page": page, "pagelen": per_page},
     ).json()
-    return [repository_summary(repo) for repo in payload.get("values", [])]
+
+    repos: list[dict] = []
+    for workspace in workspaces_payload.get("values", []):
+        slug = workspace.get("slug")
+        if not slug:
+            continue
+        next_path: str | None = f"/repositories/{slug}"
+        next_params: dict | None = {"pagelen": 100}
+        for _ in range(5):  # cap: 5 pages (<=500 repos) per workspace
+            if not next_path:
+                break
+            repo_payload = _bitbucket_get(next_path, token, next_params).json()
+            repos.extend(repository_summary(repo) for repo in repo_payload.get("values", []))
+            next_link = repo_payload.get("next")
+            if next_link and next_link.startswith(BITBUCKET_API_URL):
+                next_path = next_link[len(BITBUCKET_API_URL):]
+                next_params = None  # already encoded in next_link's query string
+            else:
+                next_path = None
+    return repos
 
 
 def get_repository(token: str, full_name: str) -> dict:

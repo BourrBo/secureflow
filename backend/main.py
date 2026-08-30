@@ -24,6 +24,7 @@ from routes.sast import router as sast_router
 from routes.sca import router as sca_router
 from routes.secrets import router as secrets_router
 from services.db_service import close_pool, init_db
+from services.git_service import sweep_orphaned_scans
 
 logging.basicConfig(
     level=logging.INFO,
@@ -36,6 +37,14 @@ logger = logging.getLogger("secureflow")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    try:
+        removed = sweep_orphaned_scans()
+        if removed:
+            logger.info("Cleaned up %d leftover tmp_scans director%s from before this startup.", removed, "y" if removed == 1 else "ies")
+    except Exception:
+        # Never blocks startup over a cleanup sweep — worst case, disk
+        # usage stays as it was; it isn't a reason to refuse to serve traffic.
+        logger.warning("Startup sweep of tmp_scans failed — leftover directories may remain.", exc_info=True)
     try:
         integrations_store.initialize()
     except Exception:
