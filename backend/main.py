@@ -3,10 +3,9 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import logging
-import time
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from integrations import store as integrations_store
@@ -26,39 +25,70 @@ from routes.secrets import router as secrets_router
 from services.db_service import close_pool, init_db
 from services.git_service import sweep_orphaned_scans
 
+# ---------------------------------------------------------
+# Logging configuration
+# ---------------------------------------------------------
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
 
+# Keep external library logs quiet
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+
 logger = logging.getLogger("secureflow")
 
 
+# ---------------------------------------------------------
+# Application lifecycle
+# ---------------------------------------------------------
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Initialize database
     init_db()
+
+    # Clean leftover temporary scan folders
     try:
         removed = sweep_orphaned_scans()
+
         if removed:
-            logger.info("Cleaned up %d leftover tmp_scans director%s from before this startup.", removed, "y" if removed == 1 else "ies")
-    except Exception:
-        # Never blocks startup over a cleanup sweep — worst case, disk
-        # usage stays as it was; it isn't a reason to refuse to serve traffic.
-        logger.warning("Startup sweep of tmp_scans failed — leftover directories may remain.", exc_info=True)
-    try:
-        integrations_store.initialize()
+            logger.info(
+                "Cleaned up %d leftover tmp_scans director%s.",
+                removed,
+                "y" if removed == 1 else "ies",
+            )
+
     except Exception:
         logger.warning(
-            "Integrations service tables were not initialized (see integrations/README.md for required env vars).",
+            "Startup sweep of tmp_scans failed.",
             exc_info=True,
         )
+
+    # Initialize integrations
+    try:
+        integrations_store.initialize()
+
+    except Exception:
+        logger.warning(
+            "Integrations service tables were not initialized.",
+            exc_info=True,
+        )
+
     logger.info("SecureFlow backend startup complete.")
 
     yield
 
-    logger.info("SecureFlow backend shutting down...")
+    logger.info("SecureFlow backend shutting down.")
+
     close_pool()
 
+
+# ---------------------------------------------------------
+# FastAPI application
+# ---------------------------------------------------------
 
 app = FastAPI(
     title="SecureFlow API",
@@ -67,20 +97,9 @@ app = FastAPI(
 )
 
 
-@app.middleware("http")
-async def log_requests(request: Request, call_next):
-    start = time.monotonic()
-    response = await call_next(request)
-    duration_ms = (time.monotonic() - start) * 1000
-    logger.info(
-        "%s %s -> %d (%.1fms)",
-        request.method,
-        request.url.path,
-        response.status_code,
-        duration_ms,
-    )
-    return response
-
+# ---------------------------------------------------------
+# CORS configuration
+# ---------------------------------------------------------
 
 app.add_middleware(
     CORSMiddleware,
@@ -100,6 +119,10 @@ app.add_middleware(
 )
 
 
+# ---------------------------------------------------------
+# API routes
+# ---------------------------------------------------------
+
 app.include_router(sast_router)
 app.include_router(sca_router)
 app.include_router(secrets_router)
@@ -112,18 +135,29 @@ app.include_router(compliance_router)
 app.include_router(api_keys_router)
 app.include_router(gate_router)
 
-# The integrations service is mounted under /integrations. Register the
-# organization-delete endpoint on the same sub-app so Lovable's
-# DELETE /integrations/organizations/{id} call is backed by the API.
+
+# ---------------------------------------------------------
+# Integrations
+# ---------------------------------------------------------
+
 register_organization_delete(integrations_app)
+
 app.mount("/integrations", integrations_app)
 
 
+# ---------------------------------------------------------
+# Basic endpoints
+# ---------------------------------------------------------
+
 @app.get("/")
 def home():
-    return {"message": "SecureFlow Backend Running"}
+    return {
+        "message": "SecureFlow Backend Running"
+    }
 
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    return {
+        "status": "ok"
+    }

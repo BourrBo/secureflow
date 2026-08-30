@@ -7,6 +7,7 @@ import subprocess
 
 logger = logging.getLogger(__name__)
 
+
 # Maximum time allowed for a Semgrep scan
 _TIMEOUT_SECS = 600
 
@@ -119,7 +120,7 @@ def run_semgrep(repo_path: str):
     instead of receiving a potentially problematic absolute Windows path.
 
     --no-git-ignore is used so uploaded/extracted ZIP projects are not
-    incorrectly limited to files tracked by the surrounding Git repository.
+    incorrectly limited to files tracked by Git.
     """
 
     # Convert to an absolute normalized path
@@ -139,17 +140,13 @@ def run_semgrep(repo_path: str):
     source_file_count = _count_source_files(scan_root)
 
     logger.info(
-        "Preparing Semgrep scan: target=%s, source_files=%d",
-        scan_root,
+        "SAST scan started: source_files=%d",
         source_file_count,
     )
 
-    # IMPORTANT:
-    #
-    # Run Semgrep from inside the scan directory and scan "."
-    #
-    # --no-git-ignore prevents Semgrep from limiting uploaded ZIP files
-    # to files tracked by Git.
+    # Run Semgrep from inside the scan directory.
+    # --no-git-ignore is essential for uploaded ZIP projects,
+    # because extracted files are not necessarily tracked by Git.
     command = [
         "semgrep",
         "scan",
@@ -158,12 +155,6 @@ def run_semgrep(repo_path: str):
         "--json",
         ".",
     ]
-
-    logger.info(
-        "Running Semgrep command: %s | cwd=%s",
-        " ".join(command),
-        scan_root,
-    )
 
     try:
 
@@ -191,18 +182,6 @@ def run_semgrep(repo_path: str):
             "Make sure Semgrep is installed in the active Python environment."
         ) from exc
 
-    logger.info(
-        "Semgrep finished: returncode=%d",
-        result.returncode,
-    )
-
-    # Semgrep writes its scan summary to stderr in some versions
-    if result.stderr.strip():
-
-        logger.warning(
-            "Semgrep stderr: %s",
-            result.stderr.strip()[:3000],
-        )
 
     # Semgrep must produce JSON output
     if not result.stdout.strip():
@@ -215,6 +194,8 @@ def run_semgrep(repo_path: str):
             f"stderr: {stderr}"
         )
 
+
+    # Parse Semgrep JSON
     try:
 
         data = json.loads(result.stdout)
@@ -226,11 +207,22 @@ def run_semgrep(repo_path: str):
             f"stderr={result.stderr.strip() or '<no stderr>'}"
         ) from exc
 
+
     # Get Semgrep-reported errors
     error_summary = _get_semgrep_errors(data)
 
-    # A non-zero exit code means Semgrep itself failed
+
+    # Only show Semgrep stderr when something actually fails.
+    # Semgrep normally writes its successful scan summary to stderr,
+    # so logging it on every successful scan creates unnecessary noise.
     if result.returncode != 0:
+
+        if result.stderr.strip():
+
+            logger.error(
+                "Semgrep error: %s",
+                result.stderr.strip()[:3000],
+            )
 
         raise RuntimeError(
             f"Semgrep failed with exit code {result.returncode}."
@@ -239,47 +231,46 @@ def run_semgrep(repo_path: str):
                 if error_summary
                 else ""
             )
-            + (
-                f" stderr: {result.stderr.strip()}"
-                if result.stderr.strip()
-                else ""
-            )
         )
 
-    # Get the files Semgrep reports as scanned
+
+    # Get files Semgrep reports as scanned
     scanned = []
 
     if isinstance(data.get("paths"), dict):
-
         scanned = data.get("paths", {}).get("scanned", [])
+
 
     findings = data.get("results", [])
 
-    logger.info(
-        "Semgrep scan complete: target=%s, "
-        "source_files=%d, semgrep_scanned=%d, findings=%d",
-        scan_root,
-        source_file_count,
-        len(scanned),
-        len(findings),
-    )
 
     # Safety check:
-    #
-    # If source code exists but Semgrep scanned nothing, never report
-    # this as a clean 0-findings scan.
+    # Source code exists but Semgrep scanned nothing.
     if source_file_count > 0 and len(scanned) == 0:
+
+        logger.error(
+            "SAST scan failed: %d source files found but Semgrep scanned 0.",
+            source_file_count,
+        )
 
         raise RuntimeError(
             f"Semgrep found {source_file_count} source file(s) in the scan target "
             f"but scanned 0 of them. "
-            f"Command: {' '.join(command)} "
-            f"Working directory: {scan_root}"
+            f"Command: {' '.join(command)}"
             + (
                 f". Semgrep errors: {error_summary}"
                 if error_summary
                 else ""
             )
         )
+
+
+    # Clean successful scan log
+    logger.info(
+        "SAST scan completed: scanned=%d, findings=%d",
+        len(scanned),
+        len(findings),
+    )
+
 
     return data
