@@ -26,7 +26,7 @@ from services.db_service import close_pool, init_db
 from services.git_service import sweep_orphaned_scans
 
 # ---------------------------------------------------------
-# Logging configuration
+# Logging
 # ---------------------------------------------------------
 
 logging.basicConfig(
@@ -34,7 +34,8 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
 
-# Keep external library logs quiet
+# Keep third-party HTTP libraries quiet during normal operation.
+# Real warnings/errors are still shown.
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 
@@ -47,10 +48,8 @@ logger = logging.getLogger("secureflow")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Initialize database
     init_db()
 
-    # Clean leftover temporary scan folders
     try:
         removed = sweep_orphaned_scans()
 
@@ -62,18 +61,20 @@ async def lifespan(app: FastAPI):
             )
 
     except Exception:
+        # Cleanup should never prevent the API from starting.
         logger.warning(
-            "Startup sweep of tmp_scans failed.",
+            "Startup sweep of tmp_scans failed; "
+            "leftover temporary directories may remain.",
             exc_info=True,
         )
 
-    # Initialize integrations
     try:
         integrations_store.initialize()
 
     except Exception:
         logger.warning(
-            "Integrations service tables were not initialized.",
+            "Integrations service tables were not initialized. "
+            "Check integrations/README.md for required environment variables.",
             exc_info=True,
         )
 
@@ -81,8 +82,7 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    logger.info("SecureFlow backend shutting down.")
-
+    logger.info("SecureFlow backend shutting down...")
     close_pool()
 
 
@@ -98,7 +98,7 @@ app = FastAPI(
 
 
 # ---------------------------------------------------------
-# CORS configuration
+# CORS
 # ---------------------------------------------------------
 
 app.add_middleware(
@@ -141,7 +141,6 @@ app.include_router(gate_router)
 # ---------------------------------------------------------
 
 register_organization_delete(integrations_app)
-
 app.mount("/integrations", integrations_app)
 
 
