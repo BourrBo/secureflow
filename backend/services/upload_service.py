@@ -96,23 +96,33 @@ def save_and_extract_zip(uploaded_file) -> str:
 
 
 def cleanup_upload(extract_path: str):
-    # Reuse the same pattern as cleanup_repo, just walk up to remove the
-    # whole temp_dir. Note: when extract_path was descended into a single
-    # wrapper folder above, this only removes temp_dir/extracted (and
-    # everything under it) — the outer temp_dir itself is left behind as
-    # an empty directory rather than truly orphaned data, and
-    # git_service.sweep_orphaned_scans() (run at backend startup) clears
-    # out anything older than 24h regardless, so it doesn't accumulate.
-    #
-    # Previously this was shutil.rmtree(ignore_errors=True) — same
-    # silent-failure problem git_service.py's cleanup_repo had: any
-    # cleanup failure (a stray read-only file from a zip that preserved
-    # that attribute, an AV/indexer lock) vanished without a trace, so
-    # orphaned uploads could pile up in tmp_scans/ the same way orphaned
-    # clones did. Sharing git_service's onerror handler keeps this
-    # consistent and, unlike before, actually logs when it fails.
-    parent_temp_dir = os.path.dirname(extract_path)
+    # Walk up from extract_path to the directory directly under _TMP_ROOT
+    # and remove that -- not just dirname(extract_path). When extract_path
+    # was descended into a single wrapper folder (see save_and_extract_zip
+    # above), a single dirname() hop only reaches temp_dir/extracted, not
+    # temp_dir itself, leaving an empty directory behind (harmless --
+    # git_service.sweep_orphaned_scans() would clear it out within 24h
+    # regardless -- but there's no reason to wait for the safety net when
+    # cleanup can just do it correctly the first time).
+    if not extract_path:
+        return
+    tmp_root = os.path.abspath(_TMP_ROOT)
+    current = os.path.abspath(extract_path)
+    temp_dir = None
+    while True:
+        parent = os.path.dirname(current)
+        if parent == tmp_root:
+            temp_dir = current
+            break
+        if current == parent:  # reached filesystem root without finding it
+            break
+        current = parent
+
+    if temp_dir is None:
+        logger.warning("cleanup_upload: %s is not under %s -- refusing to delete it", extract_path, tmp_root)
+        return
+
     try:
-        shutil.rmtree(parent_temp_dir, onerror=_clear_readonly_and_retry)
+        shutil.rmtree(temp_dir, onerror=_clear_readonly_and_retry)
     except FileNotFoundError:
         pass
