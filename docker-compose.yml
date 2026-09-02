@@ -8,10 +8,15 @@
 # both services just point at your real Supabase project via env vars,
 # same as running them without Docker.
 #
-# Usage:
-#   1. cp backend/.env.example backend/.env.docker   (fill in real values)
-#   2. cp secureflow/.env.example secureflow/.env.docker
+# Usage (first time only):
+#   1. Run ./setup.sh (macOS/Linux) or .\setup.ps1 (Windows) once — it
+#      creates backend/.env.docker and secureflow/.env.docker from the
+#      committed .env.docker.example templates (skips files that already
+#      exist, never overwrites your real values).
+#   2. Fill in the real values in those two files (Supabase URL/keys, etc).
 #   3. docker compose up --build
+#
+# Every run after that is just step 3.
 
 services:
   backend:
@@ -28,6 +33,24 @@ services:
       # Mount source for live-reload during local dev. Remove this if you
       # want the container to run purely on what was baked in at build time.
       - ./backend:/app
+      # Persists Trivy's vuln DB across container rebuilds/restarts —
+      # without this, every `docker compose up --build` wiped the cache
+      # and the next scan had to re-download the DB from ghcr.io from
+      # scratch, which is what was causing the 429 rate-limit errors and
+      # the multi-minute scan times. Independent of the ./backend bind
+      # mount above since it lives outside /app.
+      - trivy-cache:/home/appuser/.cache/trivy
+      # Trivy checks ~/.m2/repository before hitting Maven Central for
+      # Java/pom.xml dependency resolution — separate from trivy-cache
+      # above (which only holds the vuln DB, not Maven POMs).
+      # IMPORTANT: do not populate this by running `mvn` inside this
+      # backend container against arbitrary uploaded/GitHub repos — Maven
+      # executes project-defined plugins/build extensions, so that would
+      # run untrusted build code in the main application container. Only
+      # populate this volume from a separate, controlled pre-warming
+      # environment (a CI job, a throwaway container) that resolves a
+      # known/trusted repo's dependencies, then copy the result in.
+      - maven-cache:/home/appuser/.m2
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 15s
@@ -61,3 +84,7 @@ services:
       backend:
         condition: service_healthy
     restart: unless-stopped
+
+volumes:
+  trivy-cache:
+  maven-cache:
