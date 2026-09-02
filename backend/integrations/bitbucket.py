@@ -14,6 +14,7 @@ is out of scope.
 
 from __future__ import annotations
 
+import logging
 import os
 
 import httpx
@@ -22,6 +23,13 @@ from fastapi import HTTPException
 BITBUCKET_API_URL = "https://api.bitbucket.org/2.0"
 BITBUCKET_AUTHORIZE_URL = "https://bitbucket.org/site/oauth2/authorize"
 BITBUCKET_TOKEN_URL = "https://bitbucket.org/site/oauth2/access_token"
+
+logger = logging.getLogger(__name__)
+
+# How much of an upstream error body to keep in the server log. Bitbucket
+# error bodies are small JSON objects; this is just a guard against an
+# unexpectedly huge (e.g. HTML) response bloating the log line.
+_ERROR_BODY_LOG_LIMIT = 500
 
 
 def _oauth_settings() -> tuple[str, str, str]:
@@ -49,16 +57,37 @@ def exchange_code(code: str) -> dict:
             timeout=10,
         )
     except httpx.HTTPError as exc:
+        logger.warning("Bitbucket token exchange request failed: %s", exc)
         raise HTTPException(status_code=503, detail="Bitbucket OAuth service unavailable") from exc
     if response.status_code != 200:
+        # Never log the request body here -- it contains `code` (single-use,
+        # low risk, but still) and is sent alongside client_secret via HTTP
+        # basic auth. Logging the response is safe: Bitbucket's token-exchange
+        # error body doesn't echo the secret back.
+        logger.warning(
+            "Bitbucket token exchange rejected: status=%s body=%s",
+            response.status_code,
+            response.text[:_ERROR_BODY_LOG_LIMIT],
+        )
         raise HTTPException(status_code=400, detail="Bitbucket rejected the OAuth code")
     payload = response.json()
     if not payload.get("access_token"):
+        logger.warning("Bitbucket token exchange returned no access_token (200 response)")
         raise HTTPException(status_code=400, detail="Bitbucket did not return an access token")
     return payload
 
 
 def _bitbucket_get(path: str, token: str, params: dict | None = None) -> httpx.Response:
+    """GET against the Bitbucket API with a bearer token.
+
+    On any failure, the upstream status code and response body are logged
+    server-side (via `logger`, never returned to the caller) so failures can
+    be diagnosed from server logs. The token itself is never logged -- only
+    the request path and upstream response are recorded. The HTTPException
+    raised to the caller carries a generic, provider-agnostic message so no
+    Bitbucket response body -- which could, depending on the failure, echo
+    back query/params -- ever reaches the frontend.
+    """
     try:
         response = httpx.get(
             f"{BITBUCKET_API_URL}{path}",
@@ -67,7 +96,17 @@ def _bitbucket_get(path: str, token: str, params: dict | None = None) -> httpx.R
             timeout=10,
         )
     except httpx.HTTPError as exc:
+        logger.warning("Bitbucket API request failed: path=%s error=%s", path, exc)
         raise HTTPException(status_code=503, detail="Bitbucket API unavailable") from exc
+
+    if response.status_code >= 400:
+        logger.warning(
+            "Bitbucket API error: path=%s status=%s body=%s",
+            path,
+            response.status_code,
+            response.text[:_ERROR_BODY_LOG_LIMIT],
+        )
+
     if response.status_code == 401:
         raise HTTPException(status_code=401, detail="Bitbucket connection is no longer authorized")
     if response.status_code == 403:
@@ -88,32 +127,35 @@ def authenticated_user(token: str) -> dict:
 
 
 def list_repositories(token: str, page: int, per_page: int) -> list[dict]:
-    """Bitbucket has no single 'every repo across every workspace' endpoint
-    that works for this app's OAuth token type -- confirmed against a real
-    connected account, both ways: /user/permissions/repositories 404s, and
-    /repositories?role=member (tried first) 410s even for a token that was
-    issued moments earlier, so it isn't a stale-token problem either --
-    Bitbucket has just removed that query shape for tokens from a classic
-    Workspace Settings -> OAuth consumer app.
+    """Discover workspaces via the authenticated-user endpoint, then list
+    each workspace's repositories.
 
-    The endpoint that's actually documented and works: enumerate the
-    workspaces this token's user belongs to, then list repositories in
-    each one. `page`/`per_page` paginate the WORKSPACE list (most accounts
-    have only a handful, so this is normally a single page); every repo in
-    each returned workspace is fetched and flattened into one list, capped
-    at a few pages per workspace so an organization with an unusually large
-    workspace can't turn one repository-browser click into an unbounded
-    number of upstream requests.
+    `GET /2.0/workspaces` (the previous approach) has been dropped for this
+    app's OAuth token type -- confirmed against a real connected account.
+    The endpoint that's documented and works for an Authorization Code /
+    Account:Read token is `GET /2.0/user/workspaces`, which returns the
+    authenticated user's workspace memberships. Its items are nested --
+    each entry is a membership object of the shape
+    `{"workspace": {"slug": ..., ...}, "permission": ...}` -- not a bare
+    workspace object, so the slug is read from `item["workspace"]["slug"]`,
+    not `item["slug"]`.
+
+    `page`/`per_page` paginate the WORKSPACE list (most accounts have only
+    a handful, so this is normally a single page); every repo in each
+    returned workspace is fetched via `GET /2.0/repositories/{workspace}`
+    and flattened into one list, capped at a few pages per workspace so an
+    organization with an unusually large workspace can't turn one
+    repository-browser click into an unbounded number of upstream requests.
     """
     workspaces_payload = _bitbucket_get(
-        "/workspaces",
+        "/user/workspaces",
         token,
         {"page": page, "pagelen": per_page},
     ).json()
 
     repos: list[dict] = []
-    for workspace in workspaces_payload.get("values", []):
-        slug = workspace.get("slug")
+    for item in workspaces_payload.get("values", []):
+        slug = (item.get("workspace") or {}).get("slug")
         if not slug:
             continue
         next_path: str | None = f"/repositories/{slug}"

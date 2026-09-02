@@ -1,0 +1,25 @@
+# Trivy config — currently only used for Maven mirror configuration.
+# Loaded via `--config` in scanners/trivy_runner.py. Safe to keep committed:
+# no credentials belong in this file (see note below).
+#
+# Empty `mirrors:` (the default here) means Trivy behaves exactly as before
+# — this file does nothing until you point it at a real Maven proxy.
+#
+# To use a company-controlled Maven proxy (Nexus, Artifactory, etc.) and
+# stop hitting Maven Central directly during Java/pom.xml scans, uncomment
+# and fill in your proxy URL below:
+#
+# scan:
+#   maven:
+#     mirrors:
+#       - source: https://repo.maven.apache.org/maven2/
+#         targets:
+#           - https://YOUR-MAVEN-PROXY.example/repository/maven-public/
+#
+# Do not put a username/password directly in this URL (it would sit in
+# plaintext in a committed file). If your proxy needs auth, configure it
+# in Maven's settings.xml instead (mounted separately, gitignored) — see
+# https://trivy.dev/docs/coverage/language/java/#local-repository
+scan:
+  maven:
+    mirrors: []

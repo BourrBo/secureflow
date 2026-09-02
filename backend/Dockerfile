@@ -69,10 +69,24 @@ COPY . .
 # session/home dir, Trivy's vuln DB cache) — give the app user a real
 # home directory instead of running as root.
 RUN useradd --create-home --shell /bin/bash appuser \
-    && mkdir -p /home/appuser/.ZAP /app/tmp_scans \
+    && mkdir -p /home/appuser/.ZAP /home/appuser/.m2 /app/tmp_scans \
     && chown -R appuser:appuser /home/appuser /app
 USER appuser
 ENV HOME=/home/appuser
+
+# ── Trivy cache pre-warm ─────────────────────────────────────────────
+# Trivy's vuln DB (~500-600MB, from ghcr.io) used to get re-downloaded on
+# every container rebuild since nothing persisted it — that's what was
+# causing the 429 "too many requests" errors and the multi-minute first
+# scan. Baking it into the image here means a scan never depends on that
+# download succeeding at runtime at all; docker-compose.yml also mounts a
+# volume at this same path so later `trivy db update`-style refreshes
+# (Trivy does this automatically every ~24h) persist across rebuilds too.
+# `|| true` so a build never breaks if Trivy's download-only flag/output
+# changes in a future version — worst case you're back to a runtime
+# download on first scan, not a broken image.
+ENV TRIVY_CACHE_DIR=/home/appuser/.cache/trivy
+RUN trivy image --cache-dir "$TRIVY_CACHE_DIR" --download-db-only || true
 
 # ── Runtime config ───────────────────────────────────────────────────
 # ZAP_AUTOSTART defaults to "true" in zap_utils.py already — set it
