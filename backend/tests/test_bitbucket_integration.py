@@ -16,7 +16,7 @@ import logging
 
 import httpx
 import pytest
-from backend.integrations import bitbucket
+from integrations import bitbucket
 from fastapi import HTTPException
 
 FAKE_TOKEN = "fake-access-token"
