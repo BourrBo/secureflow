@@ -33,6 +33,16 @@ services:
       # Mount source for live-reload during local dev. Remove this if you
       # want the container to run purely on what was baked in at build time.
       - ./backend:/app
+      # The bind mount above brings the host's backend/.env (Windows local
+      # dev file, with ZAP_PATH pointed at a Windows zap.bat) into the
+      # container as /app/.env. main.py's load_dotenv() then picks that up
+      # and overrides ZAP auto-discovery, breaking DAST scans in Docker.
+      # An anonymous volume can't mask a single file (only directories,
+      # like the node_modules trick below), so instead bind-mount
+      # .env.docker itself directly over /app/.env, read-only — this
+      # guarantees the container only ever sees the Docker-safe env file,
+      # never the host's local one.
+      - ./backend/.env.docker:/app/.env:ro
       # Persists Trivy's vuln DB across container rebuilds/restarts —
       # without this, every `docker compose up --build` wiped the cache
       # and the next scan had to re-download the DB from ghcr.io from
