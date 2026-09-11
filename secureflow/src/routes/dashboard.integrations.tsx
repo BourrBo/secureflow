@@ -247,19 +247,31 @@ function MyOrganizationsList({
 
 function OrganizationPanel({
   organizationId,
+  loading,
   onSelect,
   onClear,
 }: {
   organizationId: number | null;
+  loading: boolean;
   onSelect: (id: number) => void;
   onClear: () => void;
 }) {
   const [name, setName] = useState("");
-  // Switching starts true whenever there's no active org yet, so the
-  // picker/create form shows by default. "Switch organization" flips it
-  // back on without ever setting organizationId to a sentinel value —
-  // that's what used to make the whole page appear to just disappear.
-  const [switching, setSwitching] = useState(organizationId === null);
+  // The previous fix only addressed `switching`'s initial value, but missed
+  // that `organizationId` itself is null on every first render — both SSR
+  // (no localStorage) AND the initial client render (the organizations
+  // query hasn't resolved yet), not just for genuinely orgless users. Any
+  // logic keyed on "organizationId === null" — including the old JSX
+  // branch below — was therefore forcing the expanded picker open on
+  // *every* load, org or no org, every single time, self-"fixing" only
+  // once data arrived, which is why Cancel was needed to get past it.
+  //
+  // Fix: don't guess from organizationId at all while the org list is
+  // still loading (`loading` is true identically during SSR and the
+  // initial client render, so there's nothing to mismatch or "correct").
+  // Only decide picker-vs-collapsed once `loading` goes false with a real
+  // answer.
+  const [switching, setSwitching] = useState(false);
 
   const create = useMutation({
     mutationFn: () => api.createOrganization(name.trim()),
@@ -277,7 +289,19 @@ function OrganizationPanel({
     onSelect(id);
   };
 
-  const showPicker = organizationId === null || switching;
+  if (loading) {
+    return (
+      <Panel
+        title="Organization"
+        description="Every integration, role, and API key belongs to an organization."
+        className="lg:col-span-2"
+      >
+        <TableSkeleton rows={1} cols={1} />
+      </Panel>
+    );
+  }
+
+  const showPicker = switching || organizationId === null;
 
   return (
     <Panel
@@ -285,7 +309,7 @@ function OrganizationPanel({
       description="Every integration, role, and API key belongs to an organization."
       className="lg:col-span-2"
     >
-      {!showPicker && organizationId ? (
+      {!showPicker && organizationId !== null ? (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border/70 bg-secondary/25 p-4">
           <div>
             <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
@@ -1329,6 +1353,7 @@ function IntegrationsPage() {
       <div className="grid gap-5 lg:grid-cols-2">
         <OrganizationPanel
           organizationId={organizationId_}
+          loading={myOrgs.isLoading}
           onSelect={setOrganizationId}
           onClear={clearOrganization}
         />

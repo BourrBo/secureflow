@@ -44,18 +44,64 @@ function isH3SwallowedErrorBody(body: string): boolean {
   }
 }
 
+// Remediates the VAPT report's Missing Security Headers finding
+// (CWE-693, CVSS 5.3, Medium) against http://localhost:3000/. Applied
+// here (not in a Dockerfile/nginx layer) because this app has no
+// reverse proxy in front of it — server.ts's fetch() is the single
+// choke point every response (SSR pages, errors, static assets served
+// through this handler) already passes through, dev and Docker alike.
+//
+// The CSP is deliberately scoped to `frame-ancestors` only. This is a
+// Vite/TanStack Start SSR app that relies on inline hydration scripts
+// and Vite's dev-time module injection; a broader script-src/style-src
+// lockdown would need real testing against a running build (fonts,
+// Supabase/API connect-src, any inline styles Tailwind/shadcn inject)
+// to avoid breaking the app, which isn't something to guess at without
+// verifying against your actual production build. frame-ancestors is
+// additive and can't break anything that isn't already trying to frame
+// this app cross-origin — it's the safe subset to ship now; broadening
+// it later should go through a real dev/prod smoke test first.
+//
+// HSTS is added only when the request actually arrived over HTTPS —
+// sending it over plain HTTP (localhost/docker dev) does nothing useful
+// and risks pinning a host that isn't ready for it if a browser ever
+// saw it by mistake on a not-yet-HTTPS deploy.
+function withSecurityHeaders(response: Response, request: Request): Response {
+  const headers = new Headers(response.headers);
+  headers.set("X-Content-Type-Options", "nosniff");
+  headers.set("X-Frame-Options", "SAMEORIGIN");
+  if (!headers.has("Content-Security-Policy")) {
+    headers.set("Content-Security-Policy", "frame-ancestors 'self'");
+  }
+  headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
+  if (!headers.has("Permissions-Policy")) {
+    headers.set("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+  }
+  if (new URL(request.url).protocol === "https:") {
+    headers.set("Strict-Transport-Security", "max-age=63072000; includeSubDomains");
+  }
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
 export default {
   async fetch(request: Request, env: unknown, ctx: unknown) {
     try {
       const handler = await getServerEntry();
       const response = await handler.fetch(request, env, ctx);
-      return await normalizeCatastrophicSsrResponse(response);
+      return withSecurityHeaders(await normalizeCatastrophicSsrResponse(response), request);
     } catch (error) {
       console.error(error);
-      return new Response(renderErrorPage(), {
-        status: 500,
-        headers: { "content-type": "text/html; charset=utf-8" },
-      });
+      return withSecurityHeaders(
+        new Response(renderErrorPage(), {
+          status: 500,
+          headers: { "content-type": "text/html; charset=utf-8" },
+        }),
+        request,
+      );
     }
   },
 };
