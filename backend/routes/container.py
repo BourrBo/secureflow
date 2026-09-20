@@ -13,6 +13,7 @@ from services.db_service import (
     get_or_create_project,
     insert_findings,
 )
+from services.scan_concurrency import scan_semaphore
 
 router = APIRouter()
 
@@ -41,6 +42,7 @@ def scan_container(request: ContainerScanRequest, user_id: str = Depends(require
     )
     scan_id = create_scan(user_id, project_id, "container")
 
+    scan_semaphore.acquire()
     try:
         raw_results = run_container_scan(request.image_name)
 
@@ -62,3 +64,6 @@ def scan_container(request: ContainerScanRequest, user_id: str = Depends(require
             status_code=500,
             detail=str(e)
         ) from e
+
+    finally:
+        scan_semaphore.release()

@@ -1,789 +1,166 @@
 # SecureFlow
 
-SecureFlow is an application security (AppSec) platform that brings multiple security scanning capabilities into one dashboard and normalizes their results into a common findings model.
+**A full-stack application security platform that runs five scanners behind one REST API and one dashboard.**
 
-It is developed as a B.Tech major internship project at Laati Consulting. The system is built around a FastAPI backend, a Lovable-managed web frontend, and Supabase PostgreSQL for persistent, user-scoped data.
+SecureFlow scans source code, dependencies, containers, infrastructure-as-code and running web apps, then normalizes every result into a single finding model. Findings can be deduplicated across engines, triaged through a lifecycle, mapped to ISO/IEC 27001:2022 controls, exported as reports, and used to pass or fail a CI/CD pipeline.
 
-## What SecureFlow does
+<!-- Add badges once CI is set up, for example:
+![CI](https://github.com/BourrBo/secureflow/actions/workflows/ci.yml/badge.svg)
+-->
 
-| Capability | Purpose |
+<!-- Add a hero screenshot: ![SecureFlow dashboard](docs/screenshots/dashboard.png) -->
+
+## Highlights
+
+| | |
 |---|---|
-| SAST | Static source-code analysis |
-| SCA | Dependency/package vulnerability scanning |
-| IaC | Infrastructure-as-code security analysis |
-| Secrets | Regex + entropy based secret detection |
-| Container | Container image vulnerability scanning |
-| DAST | Dynamic web application security testing |
-| Compliance | ISO/IEC 27001:2022 Annex A mapping for applicable findings |
-| Reports | VAPT-style PDF, JSON and SARIF outputs |
-| CI/CD Gate | Pass/fail security decisions for pipelines |
-| Integrations | GitHub/GitLab source control and container registries |
-| Organizations & Roles | Multi-user organization access control for integrations |
+| **5 scanners** | Semgrep (SAST), Trivy (SCA and containers), Checkov (IaC), a custom entropy-based secrets detector, OWASP ZAP (DAST) |
+| **1 unified schema** | Every scanner output is normalized into one Pydantic `Finding` model with 40+ fields (severity, CWE, CVE, remediation guidance, and more) |
+| **3 source integrations** | GitHub, GitLab, Bitbucket |
+| **3 sign-in methods** | Email/password, Google, GitHub (Supabase Auth) |
+| **4 export formats** | PDF, JSON, SARIF 2.1.0, CSV |
+| **CI/CD gate** | `POST /api/gate/evaluate` returns a pass/fail decision for pipelines |
+| **Per-user data isolation** | Supabase PostgreSQL with Row Level Security on projects, scans and findings |
 
-The goal is to make these scanners operate as one product rather than a collection of independent tools.
+## Features
+
+### Scanning
+- **SAST** with Semgrep, **SCA and container scanning** with Trivy, **IaC scanning** with Checkov.
+- **Secrets detection** using a custom entropy-based detector.
+- **DAST** with OWASP ZAP, run as an asynchronous background job with real-time progress reporting, so long scans never block dashboard requests. Target URLs are validated to prevent SSRF, and a strength selector (`LOW`, `MEDIUM`, `HIGH`, `INSANE`, default `MEDIUM`) controls how aggressive the attack is.
+- **Scan sources:** connect a GitHub, GitLab or Bitbucket repository, or upload a ZIP.
+
+### Findings management
+- **Cross-engine deduplication:** the same issue reported by several scanners is linked to one canonical record through `duplicate_of`, and no data is overwritten.
+- **Finding lifecycle:** `Open`, `Triaged`, `Fixed`, `Accepted`, with owner and notes fields, updated through `PATCH /api/findings/{id}`.
+- **Triage panel** with status badges and duplicate indicators in the dashboard.
+
+### Compliance and reporting
+- **ISO/IEC 27001:2022 Annex A** control mapping (`backend/mappings/iso27001.py`), shared by reports and dashboards.
+- **Compliance scoring** excludes duplicates and resolved findings (`Fixed`, `Accepted`). It reports `assessed: false` instead of a misleading 100% when nothing has been scanned yet.
+- **Reports** in PDF (ReportLab), JSON, SARIF 2.1.0 and CSV.
+
+### CI/CD integration
+- Authenticate with **`X-API-Key`** (organization-scoped keys, with fallback to legacy per-user keys) or a Supabase **Bearer** token.
+- **Decision gate** endpoint `/api/gate/evaluate` for automated pass/fail checks.
+- A **Pipeline** dashboard page (`/dashboard/pipeline`) with copy-ready CI snippets.
+- **SARIF 2.1.0** export for code-scanning tools.
 
 ## Architecture
 
-```text
-                     ┌─────────────────────────┐
-                     │       SecureFlow UI     │
-                     │ React / TanStack / Bun  │
-                     │     Lovable-managed     │
-                     └────────────┬────────────┘
-                                  │ REST
-                                  ▼
-                     ┌─────────────────────────┐
-                     │     FastAPI Backend     │
-                     │      Python / Uvicorn   │
-                     └───────┬─────────┬───────┘
-                             │         │
-                  ┌──────────┘         └───────────────┐
-                  ▼                                    ▼
-        ┌──────────────────┐                 ┌────────────────────┐
-        │   Supabase Auth  │                 │ Supabase PostgreSQL│
-        │ email + OAuth    │                 │ projects           │
-        │ + API keys       │                 │ scans              │
-        └──────────────────┘                 │ findings           │
-                                             │ gate_runs          │
-                                             │ api_keys           │
-                                             │ organizations      │
-                                             │ integrations       │
-                                             └────────────────────┘
-                             │
-                             ▼
-        ┌───────────────────────────────────────────────────────┐
-        │                        Scan Layer                     │
-        │ Semgrep  Trivy  Checkov  Secrets  OWASP ZAP  Registry │
-        └───────────────────────────────────────────────────────┘
+```mermaid
+flowchart LR
+    U[Browser<br/>React dashboard] -->|Bearer token| API
+    CI[CI/CD pipeline] -->|X-API-Key| API
+    subgraph Backend
+        API[FastAPI REST API] --> ORCH[Scan orchestration<br/>and background workers]
+        ORCH --> SEM[Semgrep]
+        ORCH --> TRV[Trivy]
+        ORCH --> CHK[Checkov]
+        ORCH --> SEC[Secrets detector]
+        ORCH --> ZAP[OWASP ZAP]
+        ORCH --> NORM[Normalizer<br/>Pydantic Finding schema]
+    end
+    NORM --> DB[(Supabase PostgreSQL<br/>Row Level Security)]
+    API --> DB
+    U -->|Auth| AUTH[Supabase Auth]
+    AUTH --> DB
+    API --> REP[Reports<br/>PDF / JSON / SARIF / CSV]
+    API --> ISO[ISO 27001:2022<br/>control mapping]
 ```
 
-## Project sources
+**Design notes**
+- The REST backend is decoupled from the frontend, and scanners are isolated behind a common runner and normalizer interface, so a new scanner means writing one adapter.
+- Every core table carries a `user_id` and is protected by Row Level Security.
+- Scans run in background workers. The API stays responsive while scans are running.
 
-### GitHub
+## Tech stack
 
-Current backend repository:
-
-`https://github.com/BourrBo/secureflow`
-
-The `main` branch is the authoritative Git source for backend code.
-
-### Lovable
-
-Current frontend project:
-
-- Project ID: `3418111a-32b7-4c0f-8a4f-6ea92ef21a06`
-- Live app: `secureflow-laati.lovable.app`
-
-Frontend stack:
-
-- React
-- TanStack Router
-- React Query
-- shadcn/ui
-- Tailwind
-- Bun
-
-### Supabase
-
-Current database:
-
-- Project ID: `avxucyqiwzgrvxaobjxf`
-- PostgreSQL
-- Supabase Auth
-- Row Level Security
-
-### Local development
-
-The backend is developed on Windows from:
-
-```text
-D:\secureflow\backend
-```
-
-Typical command:
-
-```powershell
-cd D:\secureflow\backend
-python -m venv venv
-.\venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-```
-YOU SHOULD SEE SOMETHING LIKE (venv) PS D:\secureflow\backend>
-```
-uvicorn main:app --reload --port 8000
-```
-Also The .env File is not there in this repo due to security issues 
-
-To Run the Frontend : 
-```
-cd secureflow
-npm i
-npm run dev
-```
-
-ZAP is bundled locally at:
-
-```text
-D:\secureflow\Tools\ZAP\Zed Attack Proxy\zap.bat 
-```
-
-The backend can automatically start ZAP when required.
-
-# Scanner architecture
-
-## SAST
-
-Semgrep is executed through the backend scanner runner. Its output is normalized into the shared finding model and persisted under the authenticated user's project and scan.
-
-## SCA
-
-Trivy scans project dependencies and can produce:
-
-- ecosystem
-- installed version
-- fixed version
-- CVE
-- CVSS
-- EPSS when available
-- severity
-
-## IaC
-
-Checkov-based scanning evaluates infrastructure-as-code configuration and normalizes findings with rule/location/severity/compliance metadata.
-
-## Secrets
-
-SecureFlow uses a custom entropy + regex detector. Secrets findings are scanner-specific and should not be forced into SCA-only fields such as CVE or EPSS.
-
-## Container
-
-Trivy image scanning provides container vulnerability data and, when available, CVE/CVSS/EPSS information.
-
-## DAST
-
-OWASP ZAP 2.17.0 is used for dynamic application security testing.
-
-Current DAST behavior includes:
-
-- ZAP automatic startup
-- fresh ZAP session per scan
-- traditional spider
-- passive analysis
-- AJAX spider for the full scope
-- active scanning
-- queued/running/completed/failed/cancelled/timed-out states
-- persisted progress telemetry
-- scanner coverage telemetry
-- cancellation
-- SSRF target validation
-- 4-hour safety ceiling
-- Windows sleep prevention for long scans
-- background execution so dashboard navigation does not terminate a running scan
-
-### Attack strength
-
-Attack strength is independent from scan scope:
-
-```text
-LOW
-MEDIUM
-HIGH
-INSANE
-```
-
-`MEDIUM` is the safe default. `INSANE` must be selected deliberately because it can generate tens of thousands of requests and can run for hours.
-
-Recent main-branch DAST work includes:
-
-- `f5b9feb6` — DAST updates for the previous 0% progress issue
-- `75ed8e19` — DAST updates and UI changes
-- `6d8aafd2` — attack strength added to DAST
-- `bce3226c` — findings section update
-
-# Findings model
-
-All scanner outputs are normalized into a shared persistence model so SecureFlow can provide consistent filtering/reporting while still preserving scanner-specific metadata.
-
-Core fields include:
-
-```text
-id
-user_id
-scan_id
-project_id
-scanner
-title
-description
-severity
-rule
-file
-line
-cwe
-owasp
-ecosystem
-installed_version
-fixed_version
-cve
-cvss
-epss_score
-recommendation
-iso27001_control
-iso27001_control_name
-iso27001_description
-code_context
-fingerprint
-unique_id_from_tool
-duplicate_of
-status
-owner
-notes
-first_seen_at
-last_seen_at
-```
-
-Not every field applies to every scanner.
-
-The UI should therefore be scanner-aware instead of displaying meaningless `N/A` columns:
-
-```text
-SCA / Container
-  CVE / CVSS / EPSS / ecosystem / versions
-
-SAST
-  rule / file / line / CWE / OWASP / severity / ISO
-
-Secrets
-  secret type / location / evidence / severity / ISO
-
-IaC
-  rule / location / category / severity / ISO
-
-DAST
-  alert / target / evidence / CWE / OWASP / severity / ISO
-```
-
-# Database
-
-SecureFlow uses Supabase PostgreSQL rather than the earlier SQLite implementation.
-
-Core tables include:
-
-```text
-projects
-scans
-findings
-api_keys
-gate_runs
-
-sf_organizations
-sf_organization_members
-sf_integrations
-sf_api_keys
-sf_oauth_states
-```
-
-The main ownership hierarchy is:
-
-```text
-User
- └── Projects
-      └── Scans
-           └── Findings
-```
-
-Core application tables use `user_id` ownership and RLS.
-
-Organization/integration data uses organization membership and role checks plus RLS.
-
-## Workspace reset
-
-SecureFlow supports an explicit full workspace reset for the authenticated user.
-
-The reset removes:
-
-```text
-findings
-scans
-projects
-```
-
-in dependency order.
-
-The frontend also clears:
-
-- React Query cache
-- scan-result state
-- selected organization
-- selected project/scan
-- filters
-- URL-scoped IDs
-
-Numeric PostgreSQL identity counters are separate from data existence. A complete reset can safely reset sequences only when the corresponding table is globally empty; they must never be reset while another user's rows remain.
-
-# Organizations and roles
-
-The integrations subsystem supports:
-
-```text
-Owner
-Admin
-Security
-Viewer
-```
-
-These roles control access to integrations, API keys, settings, members, scanning and read-only views.
-
-The backend is the authority for permissions. Frontend visibility is not an authorization mechanism.
-
-Organization lifecycle:
-
-```text
-Create
-  ↓
-Switch
-  ↓
-Use integrations
-  ↓
-Delete
-  ↓
-If last organization:
-  → empty/fresh organization state
-```
-
-The application must never keep requesting a deleted or unauthorized organization ID.
-
-# Source-control integrations
-
-The integrations subsystem is mounted under:
-
-```text
-/integrations
-```
-
-It provides GitHub and GitLab adapters.
-
-Typical flow:
-
-```text
-OAuth
-  ↓
-Organization
-  ↓
-Browse repositories
-  ↓
-Select repository
-  ↓
-Persist selection
-  ↓
-Run scanners
-  ↓
-Create/reuse project
-  ↓
-Create scan
-  ↓
-Persist findings
-```
-
-Third-party credentials are encrypted and must not be exposed in ordinary API responses.
-
-OAuth state is short-lived and single-use. The organization used to start OAuth must remain the organization used after the callback.
-
-# Container registries
-
-Registry integrations support:
-
-- Docker Hub
-- GHCR
-- ECR
-
-Credentials are validated against the provider before the integration is marked connected.
-
-The selected registry image can then be scanned by the container/Trivy pipeline.
-
-# Authentication
-
-Dashboard authentication uses Supabase Auth.
-
-CI/CD callers can additionally authenticate with:
-
-```http
-X-API-Key: <generated-key>
-```
-
-API keys are:
-
-- generated server-side
-- shown once at creation
-- stored as hashes
-- revocable
-- user scoped
-- optionally project scoped
-
-# CI/CD security gate
-
-SecureFlow provides a security decision layer for CI/CD.
-
-The gate can:
-
-1. evaluate findings
-2. apply a severity threshold
-3. return pass/fail
-4. persist gate history
-5. expose SARIF
-
-SecureFlow does not perform the deployment itself. The external CI/CD system decides whether to block or continue.
-
-Available security outputs include:
-
-```text
-JSON
-SARIF 2.1.0
-PDF
-```
-
-Conceptually:
-
-```text
-CI pipeline
-   ↓
-SecureFlow gate API
-   ↓
-Findings evaluated
-   ↓
-PASS / FAIL
-   ↓
-CI decides whether to continue
-```
-
-# Compliance
-
-SecureFlow maps applicable scanner findings to ISO/IEC 27001:2022 Annex A controls.
-
-The compliance view provides:
-
-- score
-- control breakdown
-- finding counts by control
-- severity mix
-- CSV export
-
-The compliance score is a technical security-posture indicator based on controls the scanners can observe; it is not a substitute for a formal ISO 27001 audit.
-
-# Reporting
-
-SecureFlow generates VAPT-style security reports from persisted findings.
-
-The report flow supports PDF generation plus structured JSON/SARIF exports.
-
-The PDF report layout is branded for Laati Consulting and includes security findings and applicable compliance mappings.
-
-The report service also contains safeguards for unusually large finding fields that previously caused ReportLab layout failures.
-
-# Frontend behavior
-
-Important frontend behavior includes:
-
-- real API-backed dashboard data
-- React Query cache
-- paginated Findings
-- server-side Findings search
-- project-specific findings and scans
-- scanner-aware Finding metadata
-- persistent scan results across dashboard navigation
-- persistent DAST scan state
-- navigation-safe DAST polling
-- organization-aware integrations
-- workspace reset that clears persisted frontend state
-- themed notifications and warnings
-- scanner-specific detail views
-
-The frontend should never display stale scan data after a destructive reset.
-
-# CI and code quality
-
-The backend repository uses:
-
-- Ruff
-- Pytest
-- GitHub Actions CI
-
-Established validation workflow:
-
-```text
-Edit
- ↓
-Python syntax / compile check
- ↓
-Ruff
- ↓
-Pytest
- ↓
-FastAPI TestClient verification where practical
-```
-
-A real dependency-free test suite was added because the older scanner scripts were live/manual scripts and were unsuitable for reliable CI collection.
-
-# Security principles
-
-SecureFlow is itself an AppSec product, so security requirements apply to the platform too.
-
-## Secrets
-
-Never commit:
-
-```text
-.env
-.env.*
-database passwords
-OAuth client secrets
-INTEGRATIONS_ENCRYPTION_KEY
-API keys
-```
-
-Use example environment files with placeholders.
-
-Any credential that has already been exposed must be rotated.
-
-## User isolation
-
-Every project, scan and finding operation must verify the authenticated owner.
-
-Never trust a client-supplied project/scan ID without authorization.
-
-## Organization isolation
-
-Organization permissions must be enforced on the backend.
-
-## DAST SSRF protection
-
-DAST must not become an SSRF primitive. Private/loopback/internal targets and cloud metadata endpoints must be controlled according to the deployment policy.
-
-## Temporary files
-
-Temporary repositories and scan artifacts must be cleaned up. Windows file locking can cause cleanup failures, so failures should be retried and logged rather than silently ignored.
-
-# Current GitHub history
-
-Recent main-branch commits relevant to the current product state:
-
-| Commit | Purpose |
+| Layer | Technology |
 |---|---|
-| `bce3226c` | Findings section update |
-| `6d8aafd2` | Attack strength added to DAST |
-| `75ed8e19` | DAST updates and UI changes |
-| `f5b9feb6` | DAST updates for the previous 0% progress issue |
-| `145394d1` | Tools added |
-| `091435f3` | GitHub integration update for project support |
-| `f241a675` | Git integration updates |
-| `3607f928` | Docker warning update |
-| `2844d49e` | Docker + EPSS fixes |
-| `34ea977a` | Docker changes + frontend update |
-| `f28b6a45` | Findings section delete-all option |
-| `f429885d` | SCA fixes |
+| Backend | Python, FastAPI, Pydantic, ReportLab |
+| Frontend | React, Vite, TanStack Router, shadcn/ui, Tailwind CSS |
+| Database and auth | Supabase (PostgreSQL, Row Level Security, Supabase Auth) |
+| Scanners | Semgrep, Trivy, Checkov, OWASP ZAP, custom secrets detector |
+| Infrastructure | Docker, Docker Compose |
 
-The old repository README is stale and describes SQLite/Next.js plus unfinished DAST/CI/CD phases. This document is intended to replace that historical description with the current architecture and behavior.
+## Security by design
 
-# Important project history
+SecureFlow processes untrusted code and untrusted targets, so its own hardening matters:
 
-The following old archives are not authoritative:
+- **ZIP upload safety:** zip-slip and path-traversal protection, long-path-safe extraction (Windows), and cleanup of temporary scan directories, including a startup sweeper for orphaned scan folders.
+- **SSRF prevention** on DAST target URLs.
+- **Row Level Security** so users can only read their own projects, scans and findings.
+- **Secrets stay out of the repo:** environment files are git-ignored and only `.env.example` templates are committed.
+- **Generic error messages** to clients, with upstream error details logged server-side only.
 
-- `secureflow-main.7z`
-- `github.rar`
-- older teammate snapshots
+## Getting started
 
-They were identified as stale or structurally different from the current application.
+### Prerequisites
+- Docker and Docker Compose
+- A Supabase project (URL and keys for the backend and frontend)
 
-Authoritative sources are:
+### Run with Docker Compose
 
-1. current GitHub `main`
-2. current Lovable project
-3. current Supabase project
-4. explicitly verified local changes
+```bash
+git clone https://github.com/BourrBo/secureflow.git
+cd secureflow
 
-Do not overwrite current code with an old archive simply because it contains a familiar feature.
+# Copy the example environment files and fill in your own values
+cp backend/.env.example backend/.env
 
-# Repository structure
+docker compose up --build
+```
 
-The main repository should be kept focused on **source code, reproducible configuration, documentation, tests, and CI/CD**.
+Compose starts the backend, frontend, PostgreSQL, OWASP ZAP and Trivy. Check the exposed ports in `docker-compose.yml`, then confirm the backend is healthy at its `/health` endpoint.
 
-A clean high-level structure is:
+> On PowerShell use `Copy-Item backend\.env.example backend\.env` instead of `cp`.
 
-```text
+Never commit real `.env` files. They are already covered by `.gitignore`.
+
+### API documentation
+FastAPI serves interactive docs at `/docs` on the backend URL. Use them to explore endpoints and try requests.
+
+## Using SecureFlow in CI/CD
+
+1. Create an API key from the dashboard.
+2. Open **Dashboard → Pipeline** and copy the snippet for your CI system.
+3. Call the gate from your pipeline with the key in the `X-API-Key` header. The endpoint returns a pass or fail decision that your pipeline can act on:
+
+```
+POST /api/gate/evaluate
+X-API-Key: <your-api-key>
+```
+
+Export SARIF 2.1.0 from a scan to surface findings in code-scanning tools.
+
+## Project structure
+
+```
 secureflow/
 ├── backend/
-│   ├── config/
-│   ├── integrations/
-│   ├── mappings/
-│   ├── models/
-│   ├── parsers/
-│   ├── routes/
-│   ├── scanners/
-│   ├── secret_detection/
-│   ├── services/
-│   ├── scripts/
-│   ├── tests/
-│   ├── main.py
-│   ├── requirements.txt
-│   ├── Dockerfile
-│   └── .env.example
-├── secureflow/
-│   └── ... Lovable-managed frontend when kept in this repository ...
-├── Tools/
-│   └── ... local security tooling only when it is intentionally versioned ...
-├── .github/
-│   └── workflows/
+│   ├── scanners/        # Scanner runners (Semgrep, Trivy, Checkov, secrets, ZAP)
+│   ├── services/        # Auth, uploads, report generation, orchestration
+│   ├── mappings/        # ISO/IEC 27001:2022 Annex A control mapping
+│   └── ...
+├── frontend/            # React + Vite dashboard
 ├── docker-compose.yml
-├── .gitignore
-├── README.md
-└── <small project documentation / architecture files>
+└── README.md
 ```
 
-The exact tree can evolve, but the repository should avoid storing generated scan output, local databases, local virtual environments, downloaded dependency caches, credentials, or large binary archives.
+## Roadmap
 
-## What should be visible on GitHub
+- Cloud deployment (Railway or a VPS)
+- Additional scanners behind the existing adapter interface
+- Automated end-to-end test suite in CI
 
-### Keep
+## My role
 
-**Source code**
-- `backend/`
-- current frontend source if the frontend is intentionally mirrored into this repository
-- scanner runners, parsers, integrations, models, routes and services
+I was the **lead integrator**: consolidating the scanner engines into the shared finding schema, the Supabase migration with Row Level Security, the asynchronous DAST pipeline, deduplication and the finding lifecycle, CI/CD integration (API keys, decision gate, SARIF), report generation, and Docker Compose deployment.
 
-**Project configuration**
-- `requirements.txt`
-- `package.json`
-- lockfiles
-- `Dockerfile`
-- `docker-compose.yml`
-- `.dockerignore`
-- `.gitignore`
-- `.env.example` / `.env.docker.example`
-- CI/CD workflow files
+## Contributors
 
-**Documentation**
-- `README.md`
-- architecture/setup/security documentation that is still accurate
-- useful migration notes and test documentation
-
-**Tests**
-- backend tests
-- any reproducible frontend test configuration
-
-**Security/product assets that are intentionally part of the app**
-- mappings such as ISO/IEC 27001 control data
-- small static assets required by the application
-- scripts that are genuinely required for migrations or maintenance
-
-### Do not keep
-
-**Secrets**
-- `.env`
-- real database URLs/passwords
-- OAuth client secrets
-- encryption keys
-- API keys
-
-**Local runtime state**
-- `venv/`
-- `__pycache__/`
-- local logs
-- local ZAP sessions
-- `.pytest_cache/`
-- `.ruff_cache/`
-
-**Generated scan/workspace data**
-- `tmp_scans/`
-- downloaded Git repositories
-- extracted ZIP contents
-- generated reports that are not intentional sample artifacts
-- user-uploaded scan files
-- `secureflow.db`
-- `*.db`, `*.sqlite`, `*.sqlite3`
-
-**Large archives / backups**
-- teammate ZIP/7z/RAR snapshots
-- old repository backups
-- `node_modules/`
-- tool caches
-- downloaded binaries that can be installed reproducibly
-
-The rule is simple:
-
-> **GitHub should contain what another developer needs to reproduce and understand SecureFlow, not the machine's current runtime state.**
-
-## About `Backend.txt`
-
-The current `Backend.txt` is stale and should be removed from the repository after the information is migrated.
-
-It still documents the old architecture:
-- `SECUREFLOW_DB` / `secureflow.db`
-- JWT environment setup from the older auth design
-- the old SQLite severity backfill
-- an older dependency description
-
-The current backend instead uses Supabase/PostgreSQL, and the current `requirements.txt` reflects the modern dependency set including `psycopg2-binary`, ZAP, EPSS, dotenv, cryptography and boto3. The old document therefore risks sending a new contributor toward a setup path that no longer matches the application.
-
-The important setup information should live in this README and, where necessary, a maintained `backend/README.md` or focused documentation file.
-
-## About the `data/` directory
-
-Do **not** remove `data/` blindly.
-
-First classify its contents:
-
-```text
-data/
-├── static application data
-├── ISO/compliance reference data
-├── test fixtures
-├── generated scan data
-└── obsolete development artifacts
-```
-
-If it contains source-of-truth application data such as compliance mappings or test fixtures, keep the required files and document them.
-
-If it contains generated scan output, local database files, downloaded repositories, temporary data, or old snapshots, remove those from Git and add the appropriate patterns to `.gitignore`.
-
-The README should describe the kept data files by purpose rather than keeping an opaque `data/` directory just because it exists.
-
-## Current repository hygiene
-
-Before any cleanup commit, verify:
-
-```powershell
-git status
-git ls-files | Select-String '\.env$|secureflow\.db|Backend\.txt|node_modules|venv|tmp_scans'
-```
-
-Then inspect the actual `data/` contents locally before deciding which files are source-of-truth.
-
-Never delete a repository directory based only on its name.
-
-# Current open work
-
-The main remaining engineering items include:
-
-1. Cross-engine finding deduplication — safe fingerprint-based logic should be adapted to the live schema; stale archive implementations must not be merged wholesale.
-2. Production deployment — Docker support exists, but production deployment, reverse proxy, secrets, long-running jobs and Linux/ZAP behavior still require deliberate verification.
-3. Repository secret cleanup — previously committed environment files/credentials need to be removed from tracking and exposed credentials rotated.
-4. DAST long-running verification — continue validating controlled targets, cancellation, timeout, restart recovery and navigation persistence.
-5. Windows temporary-repository cleanup — retry/logging exists, but cleanup should continue to be monitored.
-6. Frontend/backend live connectivity — local backend and cloud frontend need a correctly configured reachable URL/tunnel during local development.
-
-# Development conventions
-
-When changing SecureFlow:
-
-- Inspect the current GitHub `main` before trusting older handovers or archives.
-- Inspect the current Lovable project before changing frontend contracts.
-- Inspect the actual live Supabase schema before changing persistence code.
-- Preserve working DAST and security behavior.
-- Make the smallest verifiable change.
-- Verify backend changes with syntax checks, Ruff, tests and FastAPI TestClient where practical.
-- Verify Lovable changes with its typecheck/build flow.
-- Never merge a teammate archive directly without comparing it to current main.
-- Never expose credentials in source, reports or logs.
-
-## Project principle
-
-> SecureFlow should behave like a real security product: real backend state, real persistence, explicit authorization, truthful UI, scanner-aware data, meaningful tests, observable failures, and no unsupported product claims.
+- **Shivam** ([@BourrBo](https://github.com/BourrBo)): lead integrator
+- **Sujal**: SCA/Trivy module, GitHub/GitLab/Bitbucket OAuth integrations, organization and role-based access control
+- **Vansh**: cross-engine deduplication design
+- **Amit Kumar**: QA testing

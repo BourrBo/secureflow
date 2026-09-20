@@ -13,6 +13,38 @@ _BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 _TMP_ROOT = os.path.join(_BASE_DIR, "..", "tmp_scans")
 os.makedirs(_TMP_ROOT, exist_ok=True)
 
+# Uploaded ZIPs are untrusted input with no size limit enforced before this
+# -- a small crafted archive could previously decompress to gigabytes (a
+# "zip bomb") and fill the VPS disk. Both limits are independently
+# configurable and generous by default; tighten them if your real repos
+# are much smaller than this.
+_MAX_ZIP_UPLOAD_BYTES = int(os.environ.get("MAX_UPLOAD_ZIP_MB", "200")) * 1024 * 1024
+_MAX_EXTRACTED_BYTES = int(os.environ.get("MAX_UPLOAD_EXTRACTED_MB", "1000")) * 1024 * 1024
+
+
+def _copy_within_budget(src, dst, remaining_budget: list[int]) -> None:
+    """Stream-copy src -> dst, raising once the shared decompression budget
+    (tracked in remaining_budget[0], a one-item list so every call across
+    the whole archive shares and decrements the same counter) is exceeded.
+    Checked against actual bytes written, not the zip entry's declared
+    (attacker-controlled) size, so a mismatched/lying header can't bypass
+    this."""
+    chunk_size = 1024 * 1024
+    while True:
+        chunk = src.read(chunk_size)
+        if not chunk:
+            return
+        remaining_budget[0] -= len(chunk)
+        if remaining_budget[0] < 0:
+            raise RuntimeError(
+                "Uploaded archive decompresses to more than "
+                f"{_MAX_EXTRACTED_BYTES // (1024 * 1024)}MB and was "
+                "rejected (decompression-bomb protection). Set "
+                "MAX_UPLOAD_EXTRACTED_MB to raise this limit if your "
+                "repos are legitimately larger."
+            )
+        dst.write(chunk)
+
 
 def _win_long_path(path: str) -> str:
     """Windows silently truncates or refuses to write any path over
@@ -38,6 +70,14 @@ def save_and_extract_zip(uploaded_file) -> str:
     with open(zip_path, "wb") as f:
         shutil.copyfileobj(uploaded_file.file, f)
 
+    if os.path.getsize(zip_path) > _MAX_ZIP_UPLOAD_BYTES:
+        shutil.rmtree(temp_dir, onerror=_clear_readonly_and_retry)
+        raise RuntimeError(
+            "Uploaded file exceeds the "
+            f"{_MAX_ZIP_UPLOAD_BYTES // (1024 * 1024)}MB upload limit. Set "
+            "MAX_UPLOAD_ZIP_MB to raise this if needed."
+        )
+
     extract_path = os.path.join(temp_dir, "extracted")
     extract_path_abs = os.path.abspath(extract_path)
     os.makedirs(_win_long_path(extract_path), exist_ok=True)
@@ -48,6 +88,7 @@ def save_and_extract_zip(uploaded_file) -> str:
     # itself — a malicious archive entry named e.g. "../../evil.sh" or
     # given an absolute path would otherwise write outside extract_path.
     failed: list[str] = []
+    remaining_budget = [_MAX_EXTRACTED_BYTES]  # shared, decremented across every entry below
     with zipfile.ZipFile(zip_path, "r") as zip_ref:
         for member in zip_ref.infolist():
             target_abs = os.path.abspath(os.path.join(extract_path, member.filename))
@@ -60,7 +101,7 @@ def save_and_extract_zip(uploaded_file) -> str:
             try:
                 os.makedirs(_win_long_path(os.path.dirname(target_abs)), exist_ok=True)
                 with zip_ref.open(member) as src, open(_win_long_path(target_abs), "wb") as dst:
-                    shutil.copyfileobj(src, dst)
+                    _copy_within_budget(src, dst, remaining_budget)
             except OSError:
                 failed.append(member.filename)
 

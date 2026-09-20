@@ -1,0 +1,71 @@
+# SecureFlow — PRODUCTION compose file.
+#
+# Differences from docker-compose.yml (dev):
+#   - No source bind-mounts / live-reload — runs purely on what was baked
+#     into the image at build time.
+#   - No frontend service — the frontend is hosted separately on
+#     Cloudflare (Lovable-hosted or self-deployed via wrangler), so it no
+#     longer needs to run on this VPS at all.
+#   - Backend port is NOT published to the host — only Caddy talks to it,
+#     over the internal compose network. Nothing but 80/443 is reachable
+#     from outside this box.
+#   - mem_limit/cpus set on the backend so one runaway scan (or several
+#     concurrent ones) can't take the whole VPS down — the actual fix for
+#     the ZAP OutOfMemoryError, alongside ZAP_MAX_HEAP_MB in
+#     backend/.env.docker.
+#
+# Usage:
+#   1. Create backend/.env.docker on the VPS from .env.docker.example —
+#      same variables as dev, plus APP_ENV=production and
+#      CORS_EXTRA_ORIGINS=https://secureflow.company.com (see deployment
+#      plan for the full list).
+#   2. Put your real domain in ./Caddyfile (copy Caddyfile.example).
+#   3. docker compose -f docker-compose.prod.yml up -d --build
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    env_file:
+      - ./backend/.env.docker
+    environment:
+      - PORT=8000
+      - APP_ENV=production
+    expose:
+      - "8000"
+    # 6g/3.5 cpus leaves headroom for the OS + Caddy on a 4vCPU/8GB VPS.
+    # Raise this only after upgrading the VPS itself — these numbers
+    # assume the 8GB MVP sizing discussed in the architecture plan.
+    mem_limit: 6g
+    cpus: "3.5"
+    volumes:
+      - trivy-cache:/home/appuser/.cache/trivy
+      - maven-cache:/home/appuser/.m2
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  trivy-cache:
+  maven-cache:
+  caddy-data:
+  caddy-config:

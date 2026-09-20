@@ -6,6 +6,8 @@ import subprocess
 import tempfile
 import time
 
+from utils.ssrf_guard import validate_git_clone_url
+
 logger = logging.getLogger(__name__)
 
 # Anchor temp clones to a folder inside the backend itself, on the same drive
@@ -59,6 +61,11 @@ def clone_repo(repo_url: str, *, log_url: str | None = None):
     instead of `repo_url` so an authenticated clone never leaks a token
     into logs or exception text.
     """
+    # Validate BEFORE any temp dir exists or any credentials are embedded --
+    # raises SSRFValidationError (a ValueError subclass) if repo_url isn't a
+    # safe https:// external target. See utils/ssrf_guard.py for why.
+    validate_git_clone_url(repo_url)
+
     safe_url = log_url or repo_url
     temp_dir = tempfile.mkdtemp(dir=_TMP_ROOT)
 

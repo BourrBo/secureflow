@@ -129,6 +129,17 @@ app = FastAPI(
 # isn't in this list). OPTIONS preflight itself is handled by
 # CORSMiddleware and doesn't need to be listed.
 
+# Production origin(s) come from the environment, not a hardcoded edit here
+# -- CORS_EXTRA_ORIGINS is a comma-separated list, e.g.
+# "https://secureflow.company.com". Empty by default so local dev/docker
+# behavior is completely unchanged until this is set in backend/.env.docker
+# for the production deploy.
+_extra_origins = [
+    origin.strip()
+    for origin in os.getenv("CORS_EXTRA_ORIGINS", "").split(",")
+    if origin.strip()
+]
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -136,6 +147,7 @@ app.add_middleware(
         "http://127.0.0.1:3000",
         "http://localhost:8080",
         "http://192.168.1.4:8080",
+        *_extra_origins,
     ],
     allow_origin_regex=(
         r"https://([a-zA-Z0-9-]+--)?secureflow-laati\.lovable\.app"

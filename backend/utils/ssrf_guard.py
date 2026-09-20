@@ -142,3 +142,96 @@ def validate_dast_target(target_url: str) -> str:
             )
 
     return target_url
+
+
+def validate_git_clone_url(repo_url: str) -> str:
+    """
+    Raises SSRFValidationError if repo_url is not a safe git-clone source.
+    Returns repo_url unchanged on success.
+
+    services.git_service.clone_repo() previously passed the caller-supplied
+    repo_url straight into `git clone` with no validation at all -- unlike
+    the DAST target above, which has had this check since it was built.
+    Same threat, same fix: a repo_url pointed at an internal host, a cloud
+    metadata IP, or a non-http(s) git transport (file://, ext::, git://,
+    ssh://) turns this backend's own git-clone step into an SSRF/local-file
+    read primitive. Only https:// is allowed -- every real GitHub/GitLab/
+    Bitbucket URL already is, so this costs nothing for legitimate use.
+
+    Uses a separate opt-out env var (ALLOW_PRIVATE_GIT_TARGETS) from DAST's
+    ALLOW_PRIVATE_DAST_TARGETS so enabling one never silently enables the
+    other -- these are different features with different risk profiles.
+    """
+    if not repo_url or not repo_url.strip():
+        raise SSRFValidationError("repo_url must not be empty.")
+
+    repo_url = repo_url.strip()
+    parsed = urlparse(repo_url)
+
+    if parsed.scheme.lower() != "https":
+        raise SSRFValidationError(
+            f"Unsupported scheme '{parsed.scheme}'. Only https:// git URLs "
+            "are allowed."
+        )
+
+    hostname = parsed.hostname
+    if not hostname:
+        raise SSRFValidationError("repo_url has no resolvable host.")
+
+    if os.getenv("ALLOW_PRIVATE_GIT_TARGETS", "false").strip().lower() in (
+        "1", "true", "yes",
+    ):
+        logger.warning(
+            "ALLOW_PRIVATE_GIT_TARGETS is set — skipping SSRF validation "
+            "for git-clone host '%s'. Only use this where scanning "
+            "internal git servers is an intentional, authorized use.",
+            hostname,
+        )
+        return repo_url
+
+    lowered = hostname.lower()
+    if lowered in ("localhost", "localhost.localdomain") or lowered.endswith(".local"):
+        raise SSRFValidationError(
+            f"Host '{hostname}' is a local/internal address and is not "
+            "allowed as a git-clone source."
+        )
+
+    literal_ip = None
+    try:
+        literal_ip = ipaddress.ip_address(hostname)
+    except ValueError:
+        pass  # not a literal IP -- it's a hostname, resolve it below.
+
+    if literal_ip is not None:
+        if _is_blocked_ip(literal_ip):
+            raise SSRFValidationError(
+                f"Host '{hostname}' is a loopback/link-local/private/"
+                "reserved address and is not allowed as a git-clone source."
+            )
+        return repo_url
+
+    try:
+        addr_infos = socket.getaddrinfo(hostname, None)
+    except socket.gaierror as exc:
+        raise SSRFValidationError(
+            f"Could not resolve host '{hostname}': {exc}"
+        ) from exc
+
+    resolved_ips = {info[4][0] for info in addr_infos}
+    if not resolved_ips:
+        raise SSRFValidationError(f"Host '{hostname}' did not resolve to any address.")
+
+    for ip_str in resolved_ips:
+        ip_str = ip_str.split("%")[0]
+        try:
+            ip_obj = ipaddress.ip_address(ip_str)
+        except ValueError:
+            continue
+        if _is_blocked_ip(ip_obj):
+            raise SSRFValidationError(
+                f"Host '{hostname}' resolves to '{ip_str}', which is a "
+                "loopback/link-local/private/reserved address and is not "
+                "allowed as a git-clone source."
+            )
+
+    return repo_url

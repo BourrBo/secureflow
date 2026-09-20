@@ -15,6 +15,7 @@ from services.db_service import (
     insert_findings,
 )
 from services.git_service import cleanup_repo, clone_repo
+from services.scan_concurrency import scan_semaphore
 from services.upload_service import cleanup_upload, save_and_extract_zip
 
 router = APIRouter()
@@ -49,6 +50,7 @@ def scan_sca(
         "sca",
     )
 
+    scan_semaphore.acquire()
     try:
         repo_path = clone_repo(request.repo_url)
 
@@ -89,6 +91,7 @@ def scan_sca(
         ) from e
 
     finally:
+        scan_semaphore.release()
         if repo_path:
             cleanup_repo(repo_path)
 
@@ -119,6 +122,7 @@ def scan_sca_local(
         "sca",
     )
 
+    scan_semaphore.acquire()
     try:
         extract_path = save_and_extract_zip(file)
 
@@ -159,5 +163,6 @@ def scan_sca_local(
         ) from e
 
     finally:
+        scan_semaphore.release()
         if extract_path:
             cleanup_upload(extract_path)

@@ -1,0 +1,25 @@
+# Copy this to ./Caddyfile and replace the domain with your real one
+# before running docker-compose.prod.yml.
+#
+# Caddy gets HTTPS automatically (Let's Encrypt) the first time it starts,
+# as long as api.secureflow.company.com's DNS A record points at this VPS.
+# This works fine with Cloudflare's orange-cloud proxy on (recommended) —
+# Cloudflare just forwards the ACME HTTP-01 validation request through to
+# this origin on port 80 like any other request.
+
+api.secureflow.company.com {
+	reverse_proxy backend:8000
+
+	encode gzip
+
+	# Matches the security-header intent already in backend/main.py —
+	# HSTS specifically only makes sense set here (or at Cloudflare), since
+	# it's a browser-facing transport guarantee for the whole domain.
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+	}
+
+	log {
+		output file /data/access.log
+	}
+}

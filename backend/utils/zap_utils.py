@@ -176,8 +176,17 @@ def ensure_zap_reachable(config: dict, timeout_secs: int = 90) -> None:
             "the backend."
         )
 
+    # ZAP_MAX_HEAP_MB bounds the JVM heap ZAP runs with -- previously
+    # unset entirely, which is what let one aggressive Full scan exhaust
+    # all host RAM (the OutOfMemoryError seen before). 2048MB is a safe
+    # default for an 8GB VPS with MAX_CONCURRENT_SCANS=1; raise it once
+    # you've upgraded RAM and confirmed headroom. zap.sh passes -X flags
+    # through to the underlying `java` invocation, so this must come
+    # before -daemon on the command line.
+    zap_heap_mb = os.environ.get("ZAP_MAX_HEAP_MB", "2048")
     command = [
         zap_path,
+        f"-Xmx{zap_heap_mb}m",
         "-daemon",
         "-host", config["host"],
         "-port", config["port"],
